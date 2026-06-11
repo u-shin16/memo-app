@@ -1,0 +1,42 @@
+{
+  "templates": [
+    {
+      "id": "official-dev-note",
+      "name": "開発メモ",
+      "official": true,
+      "created_at": "2026-06-10T00:00:00",
+      "updated_at": "2026-06-10T00:00:00",
+      "tree": {
+        "title": "開発メモ",
+        "content": "開発中のアイデア、実装、改善案をまとめるテンプレートです。",
+        "children": [
+          {
+            "title": "アイデア",
+            "content": "今後実装したいものや、思いついたことを書き留めます。",
+            "children": []
+          },
+          {
+            "title": "実装メモ",
+            "content": "作業した内容、判断したこと、参考リンクを残します。",
+            "children": []
+          },
+          {
+            "title": "改善案",
+            "content": "使いにくい点や、直したい挙動を書き留めます。",
+            "children": []
+          },
+          {
+            "title": "不具合",
+            "content": "再現手順、期待する動き、実際の動きをまとめます。",
+            "children": []
+          },
+          {
+            "title": "リリースメモ",
+            "content": "公開前に確認することや、変更点をまとめます。",
+            "children": []
+          }
+        ]
+      }
+    }
+  ]
+}

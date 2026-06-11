@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Memo｜階層メモ帳アプリ</title>
+  <meta name="description" content="アイデアを階層的に整理できるシンプルなメモ帳アプリです。画像・動画の添付にも対応。">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div>
+          <p class="eyebrow">Hierarchical Notes</p>
+          <h1>Memo</h1>
+        </div>
+        <button id="newRootBtn" class="icon-btn" title="最上位メモを追加">＋</button>
+        <button id="templatesBtn" class="icon-btn" title="テンプレート">🗂️</button>
+      </div>
+
+      <label class="search-box">
+        <span>検索</span>
+        <input id="searchInput" type="search" placeholder="タイトル・本文を検索">
+      </label>
+
+      <div class="tree-header">
+        <span>メモ一覧</span>
+        <small id="noteCount">0件</small>
+      </div>
+      <nav id="tree" class="tree" aria-label="メモ一覧"></nav>
+    </aside>
+
+    <main class="editor" id="editorArea">
+      <section class="editor-top">
+        <div>
+          <p id="breadcrumb" class="breadcrumb">メモを選択するか作成してください</p>
+          <input id="titleInput" class="title-input" placeholder="メモを選択するか作成してください">
+        </div>
+        <div class="actions">
+          <button id="undoBtn" class="btn ghost undo-btn" title="一つ前に戻る（Ctrl / ⌘ + Z）" disabled>↶ 戻る</button>
+          <button id="checkBtn" class="btn ghost check-toggle-btn" title="チェックを付ける">✅</button>
+          <button id="addChildBtn" class="btn">メモを追加</button>
+          <button id="mediaBtn"    class="btn ghost media-add-btn" title="画像・動画を添付（またはドラッグ＆ドロップ）">＋ 📎</button>
+          <button id="deleteBtn"   class="btn danger">削除</button>
+        </div>
+      </section>
+
+      <section id="selectedInfo" class="selected-info"></section>
+
+      <div id="contentInput"
+           class="content-input is-empty"
+           contenteditable="true"
+           data-placeholder="メモを選択するか作成してください"
+           spellcheck="false"></div>
+
+      <footer class="status-bar">
+        <span id="saveStatus">準備中...</span>
+        <span>Ctrl / ⌘ + S で保存・Z で戻る</span>
+      </footer>
+    </main>
+  </div>
+
+  <!-- メディア添付用ファイル入力（非表示） -->
+  <input id="mediaInput" type="file" accept="image/*,video/*" multiple hidden>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <!-- カスタム確認モーダル -->
+  <div id="confirmOverlay" class="confirm-overlay">
+    <div class="confirm-dialog" role="dialog" aria-modal="true">
+      <p class="confirm-msg" id="confirmMsg"></p>
+      <div class="confirm-btns">
+        <button id="confirmCancel" class="btn ghost">キャンセル</button>
+        <button id="confirmOk"     class="btn danger">削除</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- メディア右クリックメニュー -->
+  <div id="mediaContextMenu" class="context-menu" hidden>
+    <!-- 画像のみ表示（動画では hidden） -->
+    <div id="mediaSizeSection">
+      <button class="ctx-item" data-media-action="copy">📋 コピー</button>
+      <div class="ctx-sep"></div>
+      <div class="ctx-section-label">画像サイズ</div>
+      <button class="ctx-item" data-media-action="size" data-size="small">◻ 小 &nbsp;(120px)</button>
+      <button class="ctx-item" data-media-action="size" data-size="large">⬛ 大 &nbsp;(75%)</button>
+      <div class="ctx-sep"></div>
+      <button class="ctx-item" id="mediaTrimBtn" data-media-action="trim">✂️ トリミング</button>
+      <div class="ctx-sep"></div>
+    </div>
+    <button class="ctx-item ctx-danger" data-media-action="delete">🗑 削除</button>
+  </div>
+
+  <!-- ライトボックス（画像クリック時） -->
+  <div id="lightboxOverlay" class="lightbox-overlay" hidden>
+    <button id="lightboxClose" class="lightbox-close" title="閉じる">✕</button>
+    <img id="lightboxImg" class="lightbox-img" src="" alt="">
+  </div>
+
+  <!-- トリミングモーダル -->
+  <div id="cropOverlay" class="crop-overlay" hidden>
+    <div class="crop-dialog">
+      <p class="crop-title">トリミング</p>
+      <p class="crop-hint">ドラッグして範囲を選択 / 角をドラッグでリサイズ</p>
+      <div class="crop-canvas-wrap">
+        <canvas id="cropCanvas"></canvas>
+      </div>
+      <div class="crop-btns">
+        <button id="cropCancel" class="btn ghost">キャンセル</button>
+        <button id="cropOk"     class="btn">確定</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- テンプレートパネル -->
+  <div id="templatesOverlay" class="templates-overlay" hidden>
+    <div class="templates-dialog">
+      <div class="templates-head">
+        <p class="templates-title">テンプレート</p>
+        <button id="templatesClose" class="templates-close" title="閉じる">✕</button>
+      </div>
+      <p class="templates-hint">選択中のメモとその子メモを保存できます。追加すると新しい親メモとしてメモ一覧に入ります。</p>
+      <div class="templates-section">
+        <p class="templates-section-title">選択中のメモを保存</p>
+        <div class="templates-save-row">
+          <input id="templateNameInput" type="text" placeholder="テンプレート名を入力">
+          <button id="templateSaveBtn" class="btn">保存</button>
+        </div>
+      </div>
+      <div class="ctx-sep"></div>
+      <div class="templates-section">
+        <p class="templates-section-title">保存済みテンプレート</p>
+        <div id="templatesList" class="templates-list"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 右クリックコンテキストメニュー -->
+  <div id="contextMenu" class="context-menu" hidden>
+    <button class="ctx-item" data-action="rename">✏️　名前を変更</button>
+    <button class="ctx-item" data-action="add-child">＋　メモを追加</button>
+    <button class="ctx-item" data-action="toggle-check">✅　チェックを付ける</button>
+    <button class="ctx-item" data-action="toggle-pin">📌　ピン留め</button>
+    <button class="ctx-item" data-action="move-sibling-top">↑　最上位へ移動</button>
+    <button class="ctx-item" data-action="move-sibling-bottom">↓　最下位へ移動</button>
+    <div class="ctx-sep"></div>
+    <button class="ctx-item ctx-danger" data-action="delete">🗑　削除</button>
+  </div>
+
+  <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+</body>
+</html>

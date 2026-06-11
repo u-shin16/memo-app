@@ -1,0 +1,2237 @@
+// ── State ─────────────────────────────────────────────────────────────────────
+
+const state = {
+  data:            null,
+  selectedId:      null,
+  expanded:        new Set(),
+  saveTimer:       null,
+  contextNoteId:   null,
+  isDraggingNote:  false,
+  mediaCmFigure:   null,
+  pendingMediaCaretFigure: null,
+  undoStack:       [],
+  isApplyingUndo:  false,
+};
+
+const MAX_UNDO = 50;
+const NO_SELECTION_MESSAGE = "メモを選択するか作成してください";
+
+let _isComposing = false;
+
+// ── DOM refs ──────────────────────────────────────────────────────────────────
+
+const els = {
+  tree:             document.getElementById("tree"),
+  noteCount:        document.getElementById("noteCount"),
+  titleInput:       document.getElementById("titleInput"),
+  contentInput:     document.getElementById("contentInput"),
+  breadcrumb:       document.getElementById("breadcrumb"),
+  selectedInfo:     document.getElementById("selectedInfo"),
+  saveStatus:       document.getElementById("saveStatus"),
+  searchInput:      document.getElementById("searchInput"),
+  newRootBtn:       document.getElementById("newRootBtn"),
+  templatesBtn:     document.getElementById("templatesBtn"),
+  templatesOverlay: document.getElementById("templatesOverlay"),
+  templatesClose:   document.getElementById("templatesClose"),
+  templatesList:    document.getElementById("templatesList"),
+  templateNameInput: document.getElementById("templateNameInput"),
+  templateSaveBtn:  document.getElementById("templateSaveBtn"),
+  undoBtn:          document.getElementById("undoBtn"),
+  checkBtn:         document.getElementById("checkBtn"),
+  addChildBtn:      document.getElementById("addChildBtn"),
+  mediaBtn:         document.getElementById("mediaBtn"),
+  mediaInput:       document.getElementById("mediaInput"),
+  deleteBtn:        document.getElementById("deleteBtn"),
+  editorArea:       document.getElementById("editorArea"),
+  toast:            document.getElementById("toast"),
+  confirmOverlay:   document.getElementById("confirmOverlay"),
+  contextMenu:      document.getElementById("contextMenu"),
+  mediaContextMenu: document.getElementById("mediaContextMenu"),
+  mediaSizeSection: document.getElementById("mediaSizeSection"),
+  mediaTrimBtn:     document.getElementById("mediaTrimBtn"),
+  // Lightbox
+  lightboxOverlay:  document.getElementById("lightboxOverlay"),
+  lightboxImg:      document.getElementById("lightboxImg"),
+  lightboxClose:    document.getElementById("lightboxClose"),
+  // Crop
+  cropOverlay:      document.getElementById("cropOverlay"),
+  cropCanvas:       document.getElementById("cropCanvas"),
+  cropOk:           document.getElementById("cropOk"),
+  cropCancel:       document.getElementById("cropCancel"),
+};
+
+// ── Toast ─────────────────────────────────────────────────────────────────────
+
+function showToast(message) {
+  els.toast.textContent = message;
+  els.toast.classList.add("show");
+  setTimeout(() => els.toast.classList.remove("show"), 2600);
+}
+
+// ── Confirm modal ─────────────────────────────────────────────────────────────
+
+let _confirmResolve = null;
+
+function showConfirm(message, okLabel = "削除") {
+  document.getElementById("confirmMsg").textContent = message;
+  document.getElementById("confirmOk").textContent  = okLabel;
+  els.confirmOverlay.classList.add("open");
+  requestAnimationFrame(() => document.getElementById("confirmOk").focus());
+  return new Promise(r => { _confirmResolve = r; });
+}
+
+function resolveConfirm(result) {
+  els.confirmOverlay.classList.remove("open");
+  if (_confirmResolve) { const r = _confirmResolve; _confirmResolve = null; r(result); }
+}
+
+(function initConfirmModal() {
+  document.getElementById("confirmOk")    .addEventListener("click", () => resolveConfirm(true));
+  document.getElementById("confirmCancel").addEventListener("click", () => resolveConfirm(false));
+  els.confirmOverlay.addEventListener("click", e => {
+    if (e.target === els.confirmOverlay) resolveConfirm(false);
+  });
+})();
+
+// ── API ───────────────────────────────────────────────────────────────────────
+
+async function api(path, options = {}) {
+  const res  = await fetch(path, options);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || "通信に失敗しました。");
+  return data;
+}
+
+// ── Note helpers ──────────────────────────────────────────────────────────────
+
+function getNotes()        { return state.data?.notes ?? []; }
+function getSelectedNote() { return getNotes().find(n => n.id === state.selectedId) ?? null; }
+function getChildren(pid)  { return getNotes().filter(n => n.parent_id === pid); }
+
+function getParentChain(note) {
+  const chain = [];
+  let cur = note;
+  while (cur) {
+    chain.unshift(cur.title);
+    cur = getNotes().find(n => n.id === cur.parent_id) ?? null;
+  }
+  return chain;
+}
+
+function matchesSearch(note, q) {
+  if (!q) return true;
+  const lq = q.toLowerCase();
+  if (note.title.toLowerCase().includes(lq) || note.content.toLowerCase().includes(lq)) return true;
+  return getChildren(note.id).some(c => matchesSearch(c, q));
+}
+
+function countDescendants(noteId) {
+  const children = getChildren(noteId);
+  return children.reduce((sum, c) => sum + 1 + countDescendants(c.id), 0);
+}
+
+function orderTreeChildren(parentId, children) {
+  if (parentId !== null) return children;
+  return [...children].sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)));
+}
+
+function createTreeRenderContext(q) {
+  const childrenByParent = new Map();
+  getNotes().forEach(note => {
+    const key = note.parent_id ?? null;
+    if (!childrenByParent.has(key)) childrenByParent.set(key, []);
+    childrenByParent.get(key).push(note);
+  });
+
+  const query = q.toLowerCase();
+  const matchMemo = new Map();
+  const countMemo = new Map();
+
+  function childrenOf(parentId) {
+    const key = parentId ?? null;
+    return orderTreeChildren(key, childrenByParent.get(key) ?? []);
+  }
+
+  function matches(note) {
+    if (!query) return true;
+    if (matchMemo.has(note.id)) return matchMemo.get(note.id);
+    const title = String(note.title ?? "").toLowerCase();
+    const content = String(note.content ?? "").toLowerCase();
+    const result = title.includes(query) ||
+                   content.includes(query) ||
+                   childrenOf(note.id).some(child => matches(child));
+    matchMemo.set(note.id, result);
+    return result;
+  }
+
+  function descendantCount(noteId) {
+    if (countMemo.has(noteId)) return countMemo.get(noteId);
+    const total = childrenOf(noteId).reduce(
+      (sum, child) => sum + 1 + descendantCount(child.id),
+      0,
+    );
+    countMemo.set(noteId, total);
+    return total;
+  }
+
+  return { childrenOf, descendantCount, hasQuery: query.length > 0, matches };
+}
+
+function clearTreeDropHighlights() {
+  document.querySelectorAll(".tree-insert-zone.drag-target, .tree-row.drag-target, .tree-row.drag-before")
+    .forEach(el => el.classList.remove("drag-target", "drag-before"));
+}
+
+function isSameTreePosition(noteId, parentId, beforeId) {
+  if (noteId === beforeId) return true;
+
+  const normalizedParentId = parentId ?? null;
+  const moving = getNotes().find(n => n.id === noteId);
+  if (!moving || moving.parent_id !== normalizedParentId) return false;
+
+  const siblings = getChildren(normalizedParentId);
+  const orderedSiblings = orderTreeChildren(normalizedParentId, siblings);
+  const currentIndex = orderedSiblings.findIndex(n => n.id === noteId);
+  if (currentIndex < 0) return false;
+
+  if (!beforeId) return currentIndex === orderedSiblings.length - 1;
+  return orderedSiblings[currentIndex + 1]?.id === beforeId;
+}
+
+function firstSiblingId(noteId, parentId) {
+  return getChildren(parentId ?? null).find(note => note.id !== noteId)?.id ?? null;
+}
+
+function normalizeTreeDropTarget(noteId, parentId, beforeId, options = {}) {
+  const moving = getNotes().find(n => n.id === noteId);
+  const normalizedParentId = parentId ?? null;
+  if (!moving) {
+    return { parentId: normalizedParentId, beforeId: beforeId ?? null, stayedWithParent: false };
+  }
+
+  if (moving.parent_id !== null && normalizedParentId === null) {
+    const siblingBeforeId = (beforeId || options.preferSiblingStart)
+      ? firstSiblingId(noteId, moving.parent_id)
+      : null;
+    return { parentId: moving.parent_id, beforeId: siblingBeforeId, stayedWithParent: true };
+  }
+
+  if (moving.parent_id === null && normalizedParentId === null && options.preferSiblingStart) {
+    return { parentId: null, beforeId: firstSiblingId(noteId, null), stayedWithParent: false };
+  }
+
+  return { parentId: normalizedParentId, beforeId: beforeId ?? null, stayedWithParent: false };
+}
+
+async function moveNoteToTreePosition(noteId, parentId, beforeId, options = {}) {
+  if (!noteId) return;
+  const target = normalizeTreeDropTarget(noteId, parentId, beforeId, options);
+  if (isSameTreePosition(noteId, target.parentId, target.beforeId)) return;
+
+  const moving = getNotes().find(n => n.id === noteId);
+  const parentChanged = moving?.parent_id !== target.parentId;
+
+  try {
+    await reorderNote(noteId, target.beforeId, target.parentId);
+    if (target.parentId) state.expanded.add(target.parentId);
+    await loadNotes();
+    selectNote(noteId);
+    showToast(target.stayedWithParent ? "同じ親メモ内で並び替えました。" :
+              parentChanged ? "メモを移動しました。" : "並び替えました。");
+  } catch (e) { showToast(e.message); }
+}
+
+async function moveNoteToSiblingEdge(noteId, edge) {
+  const note = getNotes().find(n => n.id === noteId);
+  if (!note) return;
+  await moveNoteToTreePosition(noteId, null, null, { preferSiblingStart: edge === "start" });
+}
+
+function createTreeInsertZone(parentId, beforeId) {
+  const zone = document.createElement("div");
+  zone.className = "tree-insert-zone";
+  zone.title = "ここに並び替え";
+
+  zone.addEventListener("dragover", e => {
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = "move";
+    clearTreeDropHighlights();
+    zone.classList.add("drag-target");
+  });
+  zone.addEventListener("dragleave", () => zone.classList.remove("drag-target"));
+  zone.addEventListener("drop", async e => {
+    e.preventDefault();
+    e.stopPropagation();
+    const id = e.dataTransfer.getData("text/plain");
+    clearTreeDropHighlights();
+    await moveNoteToTreePosition(id, parentId, beforeId);
+  });
+
+  return zone;
+}
+
+function createSiblingEdgeDropZone(edge) {
+  const zone = document.createElement("div");
+  zone.className = "root-drop-zone sibling-edge-drop-zone";
+  zone.textContent = edge === "start"
+    ? "▲ 子メモは同じ親メモ内の先頭へ移動"
+    : "▼ 子メモは同じ親メモ内の末尾へ移動";
+
+  zone.addEventListener("dragover", e => {
+    e.preventDefault();
+    clearTreeDropHighlights();
+    zone.classList.add("drag-target");
+  });
+  zone.addEventListener("dragleave", () => zone.classList.remove("drag-target"));
+  zone.addEventListener("drop", async e => {
+    e.preventDefault();
+    zone.classList.remove("drag-target");
+    const id = e.dataTransfer.getData("text/plain");
+    const note = getNotes().find(n => n.id === id);
+    if (!note) return;
+    if (note.parent_id === null) {
+      showToast("子メモをドラッグしてください。");
+      return;
+    }
+    await moveNoteToTreePosition(id, null, null, { preferSiblingStart: edge === "start" });
+  });
+
+  return zone;
+}
+
+// ── コンテンツ変換 ─────────────────────────────────────────────────────────────
+
+function contentToHtml(content) {
+  if (!content) return "";
+  if (/<(img|video|figure|div|p|br|span)\b/i.test(content)) return content;
+  return content
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\n/g, "<br>");
+}
+
+function getContentHtml() { return els.contentInput.innerHTML ?? ""; }
+
+function cloneData(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function snapshotFromNote(note) {
+  if (!note) return null;
+  return {
+    noteId: note.id,
+    title: note.title ?? "",
+    content: note.content ?? "",
+  };
+}
+
+function snapshotFromEditor(noteId) {
+  if (!noteId) return null;
+  return {
+    noteId,
+    title: els.titleInput.value,
+    content: getContentHtml(),
+  };
+}
+
+function snapshotDeletedNotes(noteId) {
+  const deleteIds = new Set([noteId]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const note of getNotes()) {
+      if (deleteIds.has(note.parent_id) && !deleteIds.has(note.id)) {
+        deleteIds.add(note.id);
+        changed = true;
+      }
+    }
+  }
+
+  return {
+    kind: "delete",
+    noteId,
+    insertIndex: getNotes().findIndex(n => n.id === noteId),
+    notes: cloneData(getNotes().filter(n => deleteIds.has(n.id))),
+  };
+}
+
+function snapshotsEqual(a, b) {
+  return !!a && !!b &&
+    a.noteId === b.noteId &&
+    a.title === b.title &&
+    a.content === b.content;
+}
+
+function hasUnsavedEditorChange() {
+  const note = getSelectedNote();
+  if (!note) return false;
+  return !snapshotsEqual(snapshotFromEditor(note.id), snapshotFromNote(note));
+}
+
+function updateUndoButton() {
+  if (!els.undoBtn) return;
+  els.undoBtn.disabled = state.undoStack.length === 0 && !hasUnsavedEditorChange();
+}
+
+function undoEntriesEqual(a, b) {
+  if (!a || !b) return false;
+  const ak = a.kind ?? "edit";
+  const bk = b.kind ?? "edit";
+  if (ak !== bk) return false;
+  if (ak === "delete") return a.noteId === b.noteId && a.notes?.length === b.notes?.length;
+  return snapshotsEqual(a, b);
+}
+
+function pushUndoSnapshot(entry) {
+  if (!entry?.noteId) return;
+  const last = state.undoStack[state.undoStack.length - 1];
+  if (undoEntriesEqual(last, entry)) return;
+  state.undoStack.push(entry);
+  if (state.undoStack.length > MAX_UNDO) state.undoStack.shift();
+  updateUndoButton();
+}
+
+function expandAncestors(note) {
+  let parentId = note?.parent_id ?? null;
+  while (parentId) {
+    state.expanded.add(parentId);
+    const parent = getNotes().find(n => n.id === parentId);
+    parentId = parent?.parent_id ?? null;
+  }
+}
+
+async function applyUndoSnapshot(snapshot) {
+  const note = getNotes().find(n => n.id === snapshot.noteId);
+  if (!note) {
+    showToast("戻す対象のメモが見つかりません。");
+    updateUndoButton();
+    return;
+  }
+
+  clearTimeout(state.saveTimer);
+  state.isApplyingUndo = true;
+  try {
+    state.selectedId = snapshot.noteId;
+    expandAncestors(note);
+    els.titleInput.value = snapshot.title;
+    els.contentInput.innerHTML = snapshot.content;
+    updateEmptyState();
+
+    const upd = await updateNote(snapshot.noteId, {
+      title:   snapshot.title,
+      content: snapshot.content,
+    }, false);
+    const idx = state.data.notes.findIndex(n => n.id === upd.id);
+    if (idx >= 0) state.data.notes[idx] = upd;
+    renderTree();
+    renderEditor();
+    els.saveStatus.textContent = `戻しました ${upd.updated_at}`;
+    showToast("一つ前に戻しました。");
+  } catch (e) {
+    showToast("戻せませんでした: " + e.message);
+  } finally {
+    state.isApplyingUndo = false;
+    updateUndoButton();
+  }
+}
+
+async function restoreDeletedNotes(snapshot) {
+  state.isApplyingUndo = true;
+  try {
+    await api("/api/notes/restore", {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({
+        notes:        snapshot.notes,
+        insert_index: snapshot.insertIndex,
+      }),
+    });
+    state.selectedId = snapshot.noteId;
+    await loadNotes();
+    selectNote(snapshot.noteId);
+    showToast("削除したメモを復元しました。");
+  } catch (e) {
+    showToast("復元できませんでした: " + e.message);
+  } finally {
+    state.isApplyingUndo = false;
+    updateUndoButton();
+  }
+}
+
+async function undoLastChange() {
+  const note = getSelectedNote();
+  if (note) {
+    const saved = snapshotFromNote(note);
+    const current = snapshotFromEditor(note.id);
+    if (!snapshotsEqual(current, saved)) {
+      await applyUndoSnapshot(saved);
+      return;
+    }
+  }
+
+  let snapshot = state.undoStack.pop();
+  while (snapshot && (snapshot.kind ?? "edit") !== "delete" &&
+         !getNotes().some(n => n.id === snapshot.noteId)) {
+    snapshot = state.undoStack.pop();
+  }
+
+  if (!snapshot) {
+    updateUndoButton();
+    showToast("戻せる変更がありません。");
+    return;
+  }
+
+  if ((snapshot.kind ?? "edit") === "delete") {
+    await restoreDeletedNotes(snapshot);
+  } else {
+    await applyUndoSnapshot(snapshot);
+  }
+}
+
+function updateEmptyState() {
+  const text = els.contentInput.textContent.replace(/\u200b/g, "").trim();
+  const empty = !text &&
+                !els.contentInput.querySelector("img, video");
+  els.contentInput.classList.toggle("is-empty", empty);
+  els.contentInput.classList.toggle("is-focused", document.activeElement === els.contentInput);
+}
+
+// ── Tree render ───────────────────────────────────────────────────────────────
+
+function renderTree() {
+  const q = els.searchInput.value.trim();
+  const treeCtx = createTreeRenderContext(q);
+  els.tree.innerHTML = "";
+  els.noteCount.textContent = `${getNotes().length}件`;
+
+  treeCtx.childrenOf(null).forEach(note => {
+    const node = renderNode(note, treeCtx);
+    if (node) {
+      els.tree.appendChild(createTreeInsertZone(null, note.id));
+      els.tree.appendChild(node);
+    }
+  });
+  els.tree.appendChild(createTreeInsertZone(null, null));
+
+  els.tree.appendChild(createSiblingEdgeDropZone("start"));
+  els.tree.appendChild(createSiblingEdgeDropZone("end"));
+}
+
+function renderNode(note, treeCtx) {
+  if (!treeCtx.matches(note)) return null;
+
+  const children  = treeCtx.childrenOf(note.id);
+  const hasKids   = children.length > 0;
+  const expanded  = state.expanded.has(note.id) || treeCtx.hasQuery;
+  const descCount = treeCtx.descendantCount(note.id);
+
+  const wrapper = document.createElement("div");
+  wrapper.className = "tree-node";
+
+  const row = document.createElement("button");
+  row.className  = `tree-row${note.id === state.selectedId ? " active" : ""}${note.pinned ? " pinned" : ""}${note.checked ? " checked" : ""}`;
+  row.draggable  = true;
+  row.dataset.id = note.id;
+
+  const toggle = document.createElement("span");
+  toggle.className   = "toggle";
+  toggle.textContent = hasKids ? (expanded ? "▼" : "▶") : "•";
+
+  const titleWrap = document.createElement("span");
+  titleWrap.className = "tree-title-wrap";
+
+  if (note.pinned && note.parent_id === null) {
+    const pinIcon = document.createElement("span");
+    pinIcon.className = "tree-pin";
+    pinIcon.textContent = "📌";
+    pinIcon.title = "ピン留め中";
+    titleWrap.appendChild(pinIcon);
+  }
+
+  if (note.checked) {
+    const checkIcon = document.createElement("span");
+    checkIcon.className = "tree-check";
+    checkIcon.textContent = "✅";
+    checkIcon.title = "チェック済み";
+    titleWrap.appendChild(checkIcon);
+  }
+
+  const title = document.createElement("span");
+  title.className   = "tree-title";
+  title.textContent = note.title || "無題";
+  titleWrap.appendChild(title);
+
+  row.append(toggle, titleWrap);
+
+  if (descCount > 0) {
+    const badge = document.createElement("span");
+    badge.className   = "tree-count-badge";
+    badge.textContent = descCount;
+    row.appendChild(badge);
+  }
+
+  const addBtn = document.createElement("span");
+  addBtn.className   = "tree-add";
+  addBtn.textContent = "＋";
+  addBtn.title       = "メモを追加";
+  row.appendChild(addBtn);
+
+  row.addEventListener("click", e => {
+    if (e.target === addBtn) { e.stopPropagation(); createNote(note.id); return; }
+    if (e.target === toggle && hasKids) {
+      e.stopPropagation();
+      state.expanded.has(note.id) ? state.expanded.delete(note.id) : state.expanded.add(note.id);
+      renderTree(); return;
+    }
+    selectNote(note.id);
+  });
+
+  row.addEventListener("contextmenu", e => {
+    e.preventDefault(); e.stopPropagation();
+    showCtxMenu(e.clientX, e.clientY, note.id);
+  });
+
+  row.addEventListener("dragstart", e => {
+    e.dataTransfer.setData("text/plain", note.id);
+    document.body.classList.add("is-dragging");
+    state.isDraggingNote = true;
+  });
+  row.addEventListener("dragend", () => {
+    document.body.classList.remove("is-dragging");
+    state.isDraggingNote = false;
+    row.classList.remove("drag-target", "drag-before");
+  });
+  row.addEventListener("dragover", e => {
+    e.preventDefault();
+    clearTreeDropHighlights();
+    const rect  = row.getBoundingClientRect();
+    const upper = e.clientY < rect.top + rect.height * 0.38;
+    row.classList.toggle("drag-before", upper);
+    row.classList.toggle("drag-target",  !upper);
+  });
+  row.addEventListener("dragleave", () => {
+    row.classList.remove("drag-target", "drag-before");
+  });
+  row.addEventListener("drop", async e => {
+    e.preventDefault();
+    const isBefore = row.classList.contains("drag-before");
+    row.classList.remove("drag-target", "drag-before");
+    const id = e.dataTransfer.getData("text/plain");
+    if (!id || id === note.id) return;
+    try {
+      if (isBefore) {
+        await moveNoteToTreePosition(id, note.parent_id, note.id);
+      } else {
+        await reorderNote(id, null, note.id);
+        state.expanded.add(note.id);
+        await loadNotes(); selectNote(id);
+        showToast("メモを移動しました。");
+      }
+    } catch (err) { showToast(err.message); }
+  });
+
+  wrapper.appendChild(row);
+
+  if (hasKids && expanded) {
+    const area = document.createElement("div");
+    area.className = "tree-children";
+    children.forEach(c => {
+      const n = renderNode(c, treeCtx);
+      if (n) {
+        area.appendChild(createTreeInsertZone(note.id, c.id));
+        area.appendChild(n);
+      }
+    });
+    area.appendChild(createTreeInsertZone(note.id, null));
+    wrapper.appendChild(area);
+  }
+
+  return wrapper;
+}
+
+// ── Editor render ─────────────────────────────────────────────────────────────
+
+function renderEditor() {
+  const note = getSelectedNote();
+  if (!note) {
+    els.titleInput.value         = "";
+    els.titleInput.placeholder   = NO_SELECTION_MESSAGE;
+    els.titleInput.readOnly      = true;
+    els.contentInput.innerHTML   = "";
+    els.contentInput.contentEditable = "false";
+    els.contentInput.dataset.placeholder = NO_SELECTION_MESSAGE;
+    els.breadcrumb.textContent   = NO_SELECTION_MESSAGE;
+    els.selectedInfo.textContent = "";
+    els.checkBtn.disabled = true;
+    els.checkBtn.classList.remove("active");
+    els.checkBtn.title = "チェックを付ける";
+    els.checkBtn.textContent = "☑";
+    updateEmptyState();
+    updateUndoButton();
+    return;
+  }
+  els.checkBtn.disabled = false;
+  els.checkBtn.classList.toggle("active", Boolean(note.checked));
+  els.checkBtn.title = note.checked ? "チェックを外す" : "チェックを付ける";
+  els.checkBtn.textContent = note.checked ? "✅" : "☑";
+  els.contentInput.dataset.placeholder = "ここにメモを書いてください";
+  els.contentInput.contentEditable = "true";
+  els.titleInput.placeholder = "タイトル";
+  els.titleInput.readOnly = false;
+  els.titleInput.value = note.title;
+
+  let html = contentToHtml(note.content);
+
+  // 旧 media 配列 → インライン figure に変換（一度 content に書き込まれるとスキップ）
+  for (const item of (note.media ?? [])) {
+    if (html.includes(item.filename)) continue;
+    const url     = `/media/${item.filename}`;
+    const isVideo = (item.mime_type || "").startsWith("video/") ||
+                    /\.(mp4|mov|avi|webm|m4v|mkv)$/i.test(item.filename);
+    const alt     = (item.original_name || "").replace(/"/g, "&quot;");
+    html += isVideo
+      ? `<figure class="inline-media-figure" contenteditable="false" draggable="false">` +
+        `<video src="${url}" class="inline-media" controls preload="metadata" draggable="false"></video></figure>`
+      : `<figure class="inline-media-figure" contenteditable="false" draggable="false">` +
+        `<img src="${url}" alt="${alt}" class="inline-media" draggable="false"></figure>`;
+  }
+
+  els.contentInput.innerHTML = html;
+  ensureMediaTextLines();
+  els.breadcrumb.textContent = getParentChain(note).join(" / ");
+  const src = note.source_file ? ` / 読み込み元: ${note.source_file}` : "";
+  els.selectedInfo.textContent = `作成: ${note.created_at} / 更新: ${note.updated_at}${src}`;
+  els.saveStatus.textContent   = "保存済み";
+  updateEmptyState();
+  updateUndoButton();
+}
+
+function selectNote(id) {
+  state.selectedId = id;
+  renderTree();
+  renderEditor();
+}
+
+async function saveCurrentEditorNow() {
+  if (_isComposing || state.isApplyingUndo) return;
+  const note = getSelectedNote();
+  if (!note) return;
+
+  clearTimeout(state.saveTimer);
+  const before = snapshotFromNote(note);
+  const next = snapshotFromEditor(note.id);
+  if (snapshotsEqual(before, next)) return;
+
+  pushUndoSnapshot(before);
+  const upd = await updateNote(note.id, {
+    title:   next.title,
+    content: next.content,
+  }, false);
+  const idx = state.data.notes.findIndex(n => n.id === upd.id);
+  if (idx >= 0) state.data.notes[idx] = upd;
+  els.saveStatus.textContent = `保存済み ${upd.updated_at}`;
+}
+
+// ── Note CRUD ─────────────────────────────────────────────────────────────────
+
+async function loadNotes() {
+  state.data = await api("/api/notes");
+  if (!state.selectedId || !getSelectedNote()) {
+    const roots = getNotes().filter(n => n.parent_id === null);
+    state.selectedId = roots.length > 0 ? roots[0].id : null;
+  }
+  renderTree();
+  renderEditor();
+}
+
+async function createNote(parentId) {
+  try {
+    const note = await api("/api/notes", {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({ parent_id: parentId ?? null, title: "新しいメモ", content: "" }),
+    });
+    if (parentId) state.expanded.add(parentId);
+    await loadNotes();
+    selectNote(note.id);
+    els.titleInput.focus(); els.titleInput.select();
+    showToast("メモを追加しました。");
+  } catch (e) { showToast(e.message); }
+}
+
+async function updateNote(id, payload, reload = true) {
+  const note = await api(`/api/notes/${id}`, {
+    method:  "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body:    JSON.stringify(payload),
+  });
+  if (reload) {
+    const idx = state.data.notes.findIndex(n => n.id === id);
+    if (idx >= 0) state.data.notes[idx] = note;
+    renderTree(); renderEditor();
+  }
+  return note;
+}
+
+async function reorderNote(noteId, beforeId, parentId) {
+  return api("/api/reorder", {
+    method:  "POST",
+    headers: { "Content-Type": "application/json" },
+    body:    JSON.stringify({ note_id: noteId, before_id: beforeId, parent_id: parentId }),
+  });
+}
+
+async function togglePinnedNote(noteId) {
+  const note = getNotes().find(n => n.id === noteId);
+  if (!note) return;
+  if (note.parent_id !== null) {
+    showToast("ピン留めできるのは最上位メモだけです。");
+    return;
+  }
+
+  const nextPinned = !Boolean(note.pinned);
+  try {
+    await updateNote(noteId, { pinned: nextPinned });
+    selectNote(noteId);
+    showToast(nextPinned ? "ピン留めしました。" : "ピン留めを解除しました。");
+  } catch (e) { showToast(e.message); }
+}
+
+async function toggleCheckedNote(noteId) {
+  const note = getNotes().find(n => n.id === noteId);
+  if (!note) return;
+
+  const nextChecked = !Boolean(note.checked);
+  try {
+    await updateNote(noteId, { checked: nextChecked });
+    selectNote(noteId);
+    showToast(nextChecked ? "チェックを付けました。" : "チェックを外しました。");
+  } catch (e) { showToast(e.message); }
+}
+
+function scheduleSave() {
+  if (_isComposing || state.isApplyingUndo) return;
+  const note = getSelectedNote();
+  if (!note) return;
+  clearTimeout(state.saveTimer);
+  els.saveStatus.textContent = "編集中...";
+  updateUndoButton();
+  state.saveTimer = setTimeout(async () => {
+    if (_isComposing || state.isApplyingUndo) return;
+    try {
+      const before = snapshotFromNote(note);
+      const next = snapshotFromEditor(note.id);
+      if (snapshotsEqual(before, next)) {
+        els.saveStatus.textContent = "保存済み";
+        updateUndoButton();
+        return;
+      }
+      pushUndoSnapshot(before);
+      const upd = await updateNote(note.id, {
+        title:   next.title,
+        content: next.content,
+      }, false);
+      const idx = state.data.notes.findIndex(n => n.id === upd.id);
+      if (idx >= 0) state.data.notes[idx] = upd;
+      renderTree();
+      els.saveStatus.textContent = `保存済み ${upd.updated_at}`;
+      updateUndoButton();
+    } catch (e) { els.saveStatus.textContent = "保存失敗"; showToast(e.message); }
+  }, 600);
+}
+
+async function deleteSelectedNote() {
+  const note = getSelectedNote();
+  if (!note) return;
+  const ok = await showConfirm(`「${note.title}」とその子メモを削除しますか？`);
+  if (!ok) return;
+  try {
+    await saveCurrentEditorNow();
+    const target = getSelectedNote();
+    if (!target) return;
+    const parentId = target.parent_id;
+    const deleteSnapshot = snapshotDeletedNotes(target.id);
+    await api(`/api/notes/${target.id}`, { method: "DELETE" });
+    pushUndoSnapshot(deleteSnapshot);
+    state.selectedId = parentId;
+    await loadNotes();
+    showToast("削除しました。");
+  } catch (e) { showToast(e.message); }
+}
+
+// ── テンプレート ──────────────────────────────────────────────────────────────
+
+function renderTemplateItem(t) {
+  const item = document.createElement("div");
+  item.className = `template-item${t.official ? " is-official" : ""}`;
+  item.dataset.id = t.id;
+
+  const info = document.createElement("div");
+  info.className = "template-info";
+
+  const titleLine = document.createElement("div");
+  titleLine.className = "template-title-line";
+
+  const name = document.createElement("span");
+  name.className   = "template-name";
+  name.textContent = t.name;
+  titleLine.appendChild(name);
+
+  if (t.official) {
+    const badge = document.createElement("span");
+    badge.className = "template-badge";
+    badge.textContent = "公式";
+    titleLine.appendChild(badge);
+  }
+
+  const meta = document.createElement("span");
+  meta.className   = "template-meta";
+  meta.textContent = `${t.note_count}件のメモ`;
+
+  info.append(titleLine, meta);
+
+  const actions = document.createElement("div");
+  actions.className = "template-actions";
+
+  const applyBtn = document.createElement("button");
+  applyBtn.className   = "template-action-btn";
+  applyBtn.title       = "新しい親メモとして追加";
+  applyBtn.setAttribute("aria-label", "新しい親メモとして追加");
+  applyBtn.dataset.action = "apply";
+  applyBtn.innerHTML = "<span aria-hidden=\"true\">＋</span><span>追加</span>";
+
+  const renameBtn = document.createElement("button");
+  renameBtn.className   = "template-action-btn";
+  renameBtn.title       = "名前を変更";
+  renameBtn.setAttribute("aria-label", "名前を変更");
+  renameBtn.dataset.action = "rename";
+  renameBtn.innerHTML = "<span aria-hidden=\"true\">✎</span><span>名前変更</span>";
+
+  const deleteBtn = document.createElement("button");
+  deleteBtn.className   = "template-action-btn ctx-danger";
+  deleteBtn.title       = "削除";
+  deleteBtn.setAttribute("aria-label", "削除");
+  deleteBtn.dataset.action = "delete";
+  deleteBtn.innerHTML = "<span aria-hidden=\"true\">🗑</span><span>削除</span>";
+
+  actions.appendChild(applyBtn);
+  if (!t.official) actions.append(renameBtn, deleteBtn);
+  item.append(info, actions);
+  return item;
+}
+
+async function renderTemplatesList() {
+  let templates = [];
+  try {
+    const data = await api("/api/templates");
+    templates = data.templates ?? [];
+  } catch (e) { showToast(e.message); }
+
+  els.templatesList.innerHTML = "";
+  if (templates.length === 0) {
+    const empty = document.createElement("p");
+    empty.className   = "templates-empty";
+    empty.textContent = "保存されたテンプレートはありません。";
+    els.templatesList.appendChild(empty);
+    return;
+  }
+  const fragment = document.createDocumentFragment();
+  templates.forEach(t => fragment.appendChild(renderTemplateItem(t)));
+  els.templatesList.appendChild(fragment);
+}
+
+function showTemplatesEmptyIfNeeded() {
+  if (els.templatesList.querySelector(".template-item")) return;
+  els.templatesList.innerHTML = "";
+  const empty = document.createElement("p");
+  empty.className   = "templates-empty";
+  empty.textContent = "保存されたテンプレートはありません。";
+  els.templatesList.appendChild(empty);
+}
+
+function appendTemplateItem(template) {
+  els.templatesList.querySelector(".templates-empty")?.remove();
+  els.templatesList.appendChild(renderTemplateItem(template));
+}
+
+async function openTemplatesPanel() {
+  els.templatesOverlay.hidden = false;
+  els.templateNameInput.value = "";
+  await renderTemplatesList();
+}
+
+function closeTemplatesPanel() {
+  els.templatesOverlay.hidden = true;
+}
+
+async function saveSelectedNoteAsTemplate() {
+  const note = getSelectedNote();
+  if (!note) { showToast("先にメモを選択してください。"); return; }
+  const name = els.templateNameInput.value.trim();
+  if (!name) { showToast("テンプレート名を入力してください。"); return; }
+  try {
+    await saveCurrentEditorNow();
+    const template = await api("/api/templates", {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({ note_id: note.id, name }),
+    });
+    els.templateNameInput.value = "";
+    appendTemplateItem(template);
+    showToast("テンプレートを保存しました。");
+  } catch (e) { showToast(e.message); }
+}
+
+function startTemplateRename(item, templateId) {
+  const nameEl = item.querySelector(".template-name");
+  const orig   = nameEl.textContent;
+  const input  = document.createElement("input");
+  input.className = "template-rename-input";
+  input.value = orig;
+  nameEl.replaceWith(input);
+  input.focus(); input.select();
+  let done = false;
+  async function commit() {
+    if (done) return; done = true;
+    const val = input.value.trim() || orig;
+    nameEl.textContent = val;
+    input.replaceWith(nameEl);
+    if (val !== orig) {
+      try {
+        await api(`/api/templates/${templateId}`, {
+          method:  "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body:    JSON.stringify({ name: val }),
+        });
+        showToast("名前を変更しました。");
+      } catch (e) { showToast(e.message); await renderTemplatesList(); }
+    }
+  }
+  function cancel() { if (done) return; done = true; nameEl.textContent = orig; input.replaceWith(nameEl); }
+  input.addEventListener("blur", commit);
+  input.addEventListener("keydown", e => {
+    if (e.key === "Enter")  { e.preventDefault(); input.blur(); }
+    if (e.key === "Escape") { input.removeEventListener("blur", commit); cancel(); }
+  });
+}
+
+async function applyTemplate(templateId) {
+  try {
+    const result = await api(`/api/templates/${templateId}/apply`, {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({ parent_id: null }),
+    });
+    closeTemplatesPanel();
+    const createdNotes = result.notes ?? [];
+    if (state.data?.notes && createdNotes.length > 0) {
+      state.data.notes.push(...createdNotes);
+      selectNote(result.root_id);
+    } else {
+      await loadNotes();
+      selectNote(result.root_id);
+    }
+    showToast("テンプレートを親メモとして追加しました。");
+  } catch (e) { showToast(e.message); }
+}
+
+async function deleteTemplate(item, templateId, name) {
+  const ok = await showConfirm(`テンプレート「${name}」を削除しますか？`);
+  if (!ok) return;
+  try {
+    await api(`/api/templates/${templateId}`, { method: "DELETE" });
+    item.remove();
+    showTemplatesEmptyIfNeeded();
+    showToast("テンプレートを削除しました。");
+  } catch (e) { showToast(e.message); }
+}
+
+els.templatesBtn  .addEventListener("click", openTemplatesPanel);
+els.templatesClose.addEventListener("click", closeTemplatesPanel);
+els.templatesOverlay.addEventListener("click", e => {
+  if (e.target === els.templatesOverlay) closeTemplatesPanel();
+});
+els.templateSaveBtn.addEventListener("click", saveSelectedNoteAsTemplate);
+els.templateNameInput.addEventListener("keydown", e => {
+  if (e.key === "Enter") { e.preventDefault(); saveSelectedNoteAsTemplate(); }
+});
+els.templatesList.addEventListener("click", e => {
+  const btn = e.target.closest("[data-action]");
+  if (!btn) return;
+  const item = btn.closest(".template-item");
+  const id   = item?.dataset.id;
+  if (!id) return;
+  switch (btn.dataset.action) {
+    case "apply":  applyTemplate(id); break;
+    case "rename": startTemplateRename(item, id); break;
+    case "delete": deleteTemplate(item, id, item.querySelector(".template-name")?.textContent ?? ""); break;
+  }
+});
+
+// ── Media ─────────────────────────────────────────────────────────────────────
+
+async function uploadMedia(noteId, files) {
+  for (const file of files) {
+    if (!file.type.startsWith("image/") && !file.type.startsWith("video/")) {
+      showToast(`${file.name}: 画像・動画ファイルのみ添付できます。`);
+      continue;
+    }
+    const fd = new FormData();
+    fd.append("file", file);
+    try {
+      const item = await api(`/api/notes/${noteId}/media`, { method: "POST", body: fd });
+      insertMediaElement(item);
+    } catch (e) { showToast(`${file.name}: ${e.message}`); }
+  }
+}
+
+function createMediaCaretAnchor() {
+  const anchor = document.createElement("span");
+  anchor.className = "media-caret-anchor";
+  anchor.appendChild(document.createTextNode("\u200b"));
+  return anchor;
+}
+
+function createMediaTextLine() {
+  return createMediaCaretAnchor();
+}
+
+// 画像の実際の高さが変わるたび（読み込み完了・サイズ変更・トリミング・ウィンドウ幅変更など）に
+// 隣接するキャレットの高さを追従させる。rAF や load イベント頼みの一回限りの同期だけでは
+// 画像サイズ確定前に高さ 0 で同期されてしまい、キャレットが画像とずれたままになることがあるため。
+const mediaFigureResizeObserver = new ResizeObserver(entries => {
+  for (const entry of entries) {
+    const figure = entry.target;
+    if (!isMediaFigureReady(figure)) continue;
+    const height = figure.getBoundingClientRect().height;
+    if (height <= 0) continue;
+    const px = `${Math.round(height)}px`;
+    for (const dir of ["previousSibling", "nextSibling"]) {
+      const sibling = getMediaBoundarySibling(figure, dir);
+      if (isMediaCaretAnchor(sibling)) sibling.style.setProperty("--media-caret-height", px);
+    }
+  }
+});
+
+function lockInlineMediaDrag(root = els.contentInput) {
+  root.querySelectorAll(".inline-media-figure").forEach(figure => {
+    figure.contentEditable = "false";
+    figure.draggable = false;
+    figure.setAttribute("draggable", "false");
+    mediaFigureResizeObserver.observe(figure);
+  });
+  root.querySelectorAll(".inline-media").forEach(media => {
+    media.draggable = false;
+    media.setAttribute("draggable", "false");
+    media.addEventListener("load", () => scheduleMediaCaretSync(root), { once: true });
+    media.addEventListener("loadedmetadata", () => scheduleMediaCaretSync(root), { once: true });
+    if ((media.tagName === "IMG" && media.complete) ||
+        (media.tagName === "VIDEO" && media.readyState > 0)) {
+      scheduleMediaCaretSync(root);
+    }
+  });
+}
+
+function isEmptyMediaTextLine(node) {
+  return node?.classList?.contains("media-text-line") &&
+    !node.textContent.replace(/\u200b/g, "").trim() &&
+    !node.querySelector("img, video");
+}
+
+function isMediaCaretAnchor(node) {
+  return node?.classList?.contains("media-caret-anchor");
+}
+
+function isInlineMediaFigure(node) {
+  return node?.nodeType === Node.ELEMENT_NODE &&
+    node.classList.contains("inline-media-figure");
+}
+
+function isIgnorableMediaBoundaryNode(node) {
+  return node?.nodeType === Node.TEXT_NODE &&
+    !node.nodeValue.replace(/\u200b/g, "").trim();
+}
+
+function getMediaBoundarySibling(node, direction) {
+  let cur = node[direction];
+  while (cur && isIgnorableMediaBoundaryNode(cur)) cur = cur[direction];
+  return cur;
+}
+
+function isEmptyMediaCaretAnchor(node) {
+  return isMediaCaretAnchor(node) &&
+    !node.textContent.replace(/\u200b/g, "").trim() &&
+    !node.querySelector("img, video");
+}
+
+function getAdjacentMediaFigure(anchor) {
+  const prev = getMediaBoundarySibling(anchor, "previousSibling");
+  if (isInlineMediaFigure(prev)) {
+    return prev;
+  }
+  const next = getMediaBoundarySibling(anchor, "nextSibling");
+  if (isInlineMediaFigure(next)) {
+    return next;
+  }
+  return null;
+}
+
+// 画像/動画が読み込み済みで実寸が確定しているかどうか。読み込み前は figure の高さが
+// 0 や 1px などの仮の値になることがあり、ここで弾かないとその仮の値が
+// --media-caret-height に焼き付いて二度と正しい高さに直らなくなる。
+function isMediaFigureReady(figure) {
+  const media = figure.querySelector("img, video");
+  if (!media) return false;
+  return media.tagName === "IMG"
+    ? media.complete && media.naturalWidth > 0
+    : media.readyState > 0 && media.videoWidth > 0;
+}
+
+function syncMediaCaretAnchor(anchor) {
+  const figure = getAdjacentMediaFigure(anchor);
+  if (!figure) return false;
+  if (isMediaFigureReady(figure)) {
+    const height = figure.getBoundingClientRect().height;
+    if (height > 0) {
+      anchor.style.setProperty("--media-caret-height", `${Math.round(height)}px`);
+    }
+  }
+  anchor.classList.add("is-empty-media-caret");
+  return true;
+}
+
+function clearActiveMediaCaret(root = els.contentInput) {
+  root.querySelectorAll(".media-caret-anchor.is-active-media-caret")
+    .forEach(anchor => anchor.classList.remove("is-active-media-caret"));
+}
+
+function setActiveMediaCaret(anchor) {
+  clearActiveMediaCaret();
+  if (anchor && isEmptyMediaCaretAnchor(anchor) && syncMediaCaretAnchor(anchor)) {
+    anchor.classList.add("is-active-media-caret");
+  }
+}
+
+function updateActiveMediaCaretFromSelection() {
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0 || !selection.isCollapsed) {
+    clearActiveMediaCaret();
+    return;
+  }
+  const range = selection.getRangeAt(0);
+  const container = range.startContainer;
+  const anchor = container.nodeType === Node.ELEMENT_NODE
+    ? container.closest?.(".media-caret-anchor")
+    : container.parentElement?.closest?.(".media-caret-anchor");
+  if (anchor && els.contentInput.contains(anchor)) {
+    setActiveMediaCaret(anchor);
+  } else {
+    clearActiveMediaCaret();
+  }
+}
+
+function syncMediaCaretAnchors(root = els.contentInput) {
+  root.querySelectorAll(".media-caret-anchor").forEach(anchor => {
+    if (isEmptyMediaCaretAnchor(anchor)) syncMediaCaretAnchor(anchor);
+  });
+}
+
+function scheduleMediaCaretSync(root = els.contentInput) {
+  requestAnimationFrame(() => {
+    syncMediaCaretAnchors(root);
+    updateActiveMediaCaretFromSelection();
+    requestAnimationFrame(() => {
+      syncMediaCaretAnchors(root);
+      updateActiveMediaCaretFromSelection();
+    });
+  });
+}
+
+function normalizeMediaCaretAnchors(root = els.contentInput) {
+  root.querySelectorAll(".media-text-line").forEach(line => {
+    if (isEmptyMediaTextLine(line)) {
+      line.replaceWith(createMediaCaretAnchor());
+    } else {
+      line.classList.remove("media-text-line", "is-empty-media-line");
+    }
+  });
+
+  root.querySelectorAll(".media-caret-anchor").forEach(anchor => {
+    // \u7a7a\u72b6\u614b\u306e contenteditable \u8981\u7d20\u306b Chrome \u304c <br> \u3092\u633f\u5165\u3059\u308b\u3053\u3068\u304c\u3042\u308a\u3001
+    // (br, 0) \u306f\u30ad\u30e3\u30ec\u30c3\u30c8\u4f4d\u7f6e\u3068\u3057\u3066\u4e0d\u5b89\u5b9a\u306a\u305f\u3081 \u200b \u306b\u7f6e\u304d\u63db\u3048\u3066\u304a\u304f\u3002
+    anchor.querySelectorAll("br").forEach(br => br.remove());
+    if (!anchor.firstChild) anchor.appendChild(document.createTextNode("\u200b"));
+    if (!isEmptyMediaCaretAnchor(anchor)) {
+      anchor.classList.remove("media-caret-anchor", "is-empty-media-caret", "is-active-media-caret");
+      anchor.style.removeProperty("--media-caret-height");
+      return;
+    }
+    if (!syncMediaCaretAnchor(anchor)) anchor.remove();
+  });
+}
+
+function placeCaretInMediaCaretAnchor(anchor) {
+  if (!anchor) return;
+  els.contentInput.focus();
+  anchor.querySelectorAll("br").forEach(br => br.remove());
+  if (!anchor.firstChild) anchor.appendChild(document.createTextNode("\u200b"));
+  setActiveMediaCaret(anchor);
+  try {
+    const range = document.createRange();
+    range.setStart(anchor.firstChild, 0);
+    range.collapse(true);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+  } catch (_) {
+    // Some embedded browser layers can fail range placement; keep the visible caret.
+  }
+  requestAnimationFrame(() => setActiveMediaCaret(anchor));
+}
+
+function placeCaretInMediaTextLine(line) {
+  placeCaretInMediaCaretAnchor(line);
+}
+
+function getMediaBoundaryChild(parent, offset, direction) {
+  let index = direction === "before" ? offset - 1 : offset;
+  while (index >= 0 && index < parent.childNodes.length) {
+    const node = parent.childNodes[index];
+    if (!isIgnorableMediaBoundaryNode(node)) return node;
+    index += direction === "before" ? -1 : 1;
+  }
+  return null;
+}
+
+function nodeHasVisibleEditorContent(node) {
+  if (!node) return false;
+  if (node.nodeType === Node.TEXT_NODE) {
+    return !!node.nodeValue.replace(/\u200b/g, "").trim();
+  }
+  if (node.nodeType !== Node.ELEMENT_NODE) return false;
+  if (isMediaCaretAnchor(node)) return false;
+  if (isInlineMediaFigure(node) || node.matches?.("img, video")) return true;
+  return !!node.textContent.replace(/\u200b/g, "").trim() ||
+    !!node.querySelector?.("img, video, .inline-media-figure");
+}
+
+function isCaretAtStartOfEditorBlock(range) {
+  let node = range.startContainer;
+  let offset = range.startOffset;
+
+  if (node.nodeType === Node.TEXT_NODE) {
+    if (node.nodeValue.slice(0, offset).replace(/\u200b/g, "").trim()) return false;
+  } else if (node.nodeType === Node.ELEMENT_NODE) {
+    for (let i = 0; i < offset; i++) {
+      if (nodeHasVisibleEditorContent(node.childNodes[i])) return false;
+    }
+  }
+
+  while (node && node !== els.contentInput) {
+    let prev = node.previousSibling;
+    while (prev) {
+      if (nodeHasVisibleEditorContent(prev)) return false;
+      prev = prev.previousSibling;
+    }
+    node = node.parentNode;
+  }
+
+  return true;
+}
+
+function getTopLevelEditorNode(node) {
+  while (node && node.parentNode && node.parentNode !== els.contentInput) {
+    node = node.parentNode;
+  }
+  return node && node.parentNode === els.contentInput ? node : null;
+}
+
+function getPreviousMediaFigureForRange(range) {
+  const topNode = range.startContainer === els.contentInput
+    ? getMediaBoundaryChild(els.contentInput, range.startOffset, "before")
+    : getTopLevelEditorNode(range.startContainer);
+  if (!topNode) return null;
+
+  let prev = getMediaBoundarySibling(topNode, "previousSibling");
+  if (isMediaCaretAnchor(prev)) prev = getMediaBoundarySibling(prev, "previousSibling");
+  return isInlineMediaFigure(prev) ? prev : null;
+}
+
+function rememberMediaCaretRepair(e) {
+  state.pendingMediaCaretFigure = null;
+  if (e.key !== "Backspace" && e.key !== "Delete") return;
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0 || !selection.isCollapsed) return;
+  const range = selection.getRangeAt(0);
+  if (!els.contentInput.contains(range.startContainer) && range.startContainer !== els.contentInput) return;
+  if (!isCaretAtStartOfEditorBlock(range)) return;
+  state.pendingMediaCaretFigure = getPreviousMediaFigureForRange(range);
+}
+
+function ensureAnchorAfterFigure(figure) {
+  if (!figure) return null;
+  let next = getMediaBoundarySibling(figure, "nextSibling");
+  if (!isMediaCaretAnchor(next)) {
+    figure.insertAdjacentElement("afterend", createMediaCaretAnchor());
+    next = figure.nextElementSibling;
+  }
+  syncMediaCaretAnchor(next);
+  return next;
+}
+
+function ensureAnchorBeforeFigure(figure) {
+  if (!figure) return null;
+  let prev = getMediaBoundarySibling(figure, "previousSibling");
+  if (!isMediaCaretAnchor(prev)) {
+    figure.insertAdjacentElement("beforebegin", createMediaCaretAnchor());
+    prev = figure.previousElementSibling;
+  }
+  syncMediaCaretAnchor(prev);
+  return prev;
+}
+
+function placeCaretBesideFigure(figure, side) {
+  const anchor = side === "before"
+    ? ensureAnchorBeforeFigure(figure)
+    : ensureAnchorAfterFigure(figure);
+  placeCaretInMediaCaretAnchor(anchor);
+}
+
+function getMediaSideFromPoint(figure, clientX) {
+  if (!figure) return null;
+  const rect = figure.getBoundingClientRect();
+  const edge = Math.min(28, Math.max(14, rect.width * 0.08));
+  if (clientX <= rect.left + edge) return "before";
+  if (clientX >= rect.right - edge) return "after";
+  return null;
+}
+
+function getMediaFigureNearPoint(clientX, clientY) {
+  const maxDistance = 18;
+  for (const figure of els.contentInput.querySelectorAll(".inline-media-figure")) {
+    const rect = figure.getBoundingClientRect();
+    if (clientY < rect.top || clientY > rect.bottom) continue;
+    if (Math.abs(clientX - rect.left) <= maxDistance) return { figure, side: "before" };
+    if (Math.abs(clientX - rect.right) <= maxDistance) return { figure, side: "after" };
+  }
+  return null;
+}
+
+function restorePendingMediaCaret() {
+  const figure = state.pendingMediaCaretFigure;
+  state.pendingMediaCaretFigure = null;
+  if (!figure?.isConnected) return false;
+  const anchor = ensureAnchorAfterFigure(figure);
+  placeCaretInMediaCaretAnchor(anchor);
+  return true;
+}
+
+function repairMediaCaretAfterEdit() {
+  ensureMediaTextLines();
+  if (restorePendingMediaCaret()) return;
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0 || !selection.isCollapsed) return;
+
+  const range = selection.getRangeAt(0);
+  if (range.startContainer !== els.contentInput) return;
+
+  const before = getMediaBoundaryChild(els.contentInput, range.startOffset, "before");
+  if (!isInlineMediaFigure(before)) return;
+
+  const anchor = ensureAnchorAfterFigure(before);
+  placeCaretInMediaCaretAnchor(anchor);
+}
+
+function ensureMediaTextLines() {
+  lockInlineMediaDrag();
+  normalizeMediaCaretAnchors();
+  els.contentInput.querySelectorAll(".inline-media-figure").forEach(figure => {
+    const prev = getMediaBoundarySibling(figure, "previousSibling");
+    if (!isMediaCaretAnchor(prev) && (!prev || isInlineMediaFigure(prev))) {
+      figure.insertAdjacentElement("beforebegin", createMediaCaretAnchor());
+    }
+
+    const next = getMediaBoundarySibling(figure, "nextSibling");
+    if (!isMediaCaretAnchor(next) && (!next || isInlineMediaFigure(next))) {
+      figure.insertAdjacentElement("afterend", createMediaCaretAnchor());
+    }
+  });
+  scheduleMediaCaretSync();
+}
+
+// 画像の左右のキャレットアンカーは幅8pxしかなく、画像の隣に文字を詰め込む
+// 場所ではない。ここに文字を打ち始めたら、画像から見て外側＝前のアンカー
+// なら上の行末、後ろのアンカーなら下の行頭へキャレットを移動してから
+// 入力させる。
+function placeCaretAtDivEdge(div, edge) {
+  const range = document.createRange();
+  if (edge === "start") {
+    const first = div.firstChild;
+    if (first && first.nodeType === Node.TEXT_NODE) range.setStart(first, 0);
+    else range.setStart(div, 0);
+  } else {
+    const last = div.lastChild;
+    if (last && last.nodeType === Node.TEXT_NODE) range.setStart(last, last.length);
+    else range.setStart(div, div.childNodes.length);
+  }
+  range.collapse(true);
+  const selection = window.getSelection();
+  selection.removeAllRanges();
+  selection.addRange(range);
+}
+
+function redirectMediaCaretTyping() {
+  const anchor = els.contentInput.querySelector(".media-caret-anchor.is-active-media-caret");
+  if (!anchor) return false;
+
+  const prev = getMediaBoundarySibling(anchor, "previousSibling");
+  const next = getMediaBoundarySibling(anchor, "nextSibling");
+
+  let outerSibling, insertSide, edge;
+  if (isInlineMediaFigure(next)) {
+    outerSibling = prev;
+    insertSide = "beforebegin";
+    edge = "end";
+  } else if (isInlineMediaFigure(prev)) {
+    outerSibling = next;
+    insertSide = "afterend";
+    edge = "start";
+  } else {
+    return false;
+  }
+
+  let target = outerSibling;
+  if (!target || target.tagName !== "DIV") {
+    target = document.createElement("div");
+    anchor.insertAdjacentElement(insertSide, target);
+  }
+
+  clearActiveMediaCaret();
+  placeCaretAtDivEdge(target, edge);
+  return true;
+}
+
+function insertMediaElement(item) {
+  const url     = `/media/${item.filename}`;
+  const isVideo = item.mime_type.startsWith("video/") ||
+                  /\.(mp4|mov|avi|webm|m4v|mkv)$/i.test(item.filename);
+
+  const figure = document.createElement("figure");
+  figure.className       = "inline-media-figure";
+  figure.contentEditable = "false";
+  figure.draggable       = false;
+
+  const mediaEl = document.createElement(isVideo ? "video" : "img");
+  mediaEl.src       = url;
+  mediaEl.className = "inline-media";
+  mediaEl.draggable = false;
+  mediaEl.addEventListener(isVideo ? "loadedmetadata" : "load", () => scheduleMediaCaretSync(), { once: true });
+  if (isVideo) { mediaEl.controls = true; mediaEl.preload = "metadata"; }
+  else         { mediaEl.alt = item.original_name; }
+
+  figure.appendChild(mediaEl);
+
+  const sel = window.getSelection();
+  const hasCursor = sel && sel.rangeCount > 0 &&
+    els.contentInput.contains(sel.getRangeAt(0).commonAncestorContainer);
+  if (hasCursor) {
+    const range = sel.getRangeAt(0);
+    const insertionPoint = range.commonAncestorContainer.nodeType === Node.ELEMENT_NODE
+      ? range.commonAncestorContainer.closest?.(".media-text-line, .media-caret-anchor")
+      : range.commonAncestorContainer.parentElement?.closest?.(".media-text-line, .media-caret-anchor");
+    if (isEmptyMediaTextLine(insertionPoint) || isEmptyMediaCaretAnchor(insertionPoint)) {
+      insertionPoint.replaceWith(figure);
+    } else {
+      range.deleteContents();
+      range.collapse(false);
+      range.insertNode(figure);
+    }
+  } else {
+    els.contentInput.appendChild(figure);
+  }
+
+  ensureMediaTextLines();
+  const line = isMediaCaretAnchor(figure.nextElementSibling)
+    ? figure.nextElementSibling
+    : createMediaCaretAnchor();
+  if (!line.isConnected) figure.insertAdjacentElement("afterend", line);
+  try {
+    placeCaretInMediaCaretAnchor(line);
+  } catch (_) { els.contentInput.focus(); }
+
+  figure.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  updateEmptyState();
+  scheduleSave();
+}
+
+// ── ライトボックス ─────────────────────────────────────────────────────────────
+
+function openLightbox(imgEl) {
+  els.lightboxImg.src = imgEl.src;
+  els.lightboxImg.alt = imgEl.alt ?? "";
+  els.lightboxOverlay.hidden = false;
+  document.body.style.overflow = "hidden";
+}
+
+function closeLightbox() {
+  els.lightboxOverlay.hidden = true;
+  els.lightboxImg.src        = "";
+  document.body.style.overflow = "";
+}
+
+els.lightboxOverlay.addEventListener("click", e => {
+  if (e.target === els.lightboxOverlay || e.target === els.lightboxImg) closeLightbox();
+});
+els.lightboxClose.addEventListener("click", closeLightbox);
+
+// ── トリミングモーダル ─────────────────────────────────────────────────────────
+
+const HANDLE_HIT  = 16;
+const HANDLE_SIZE = 10;
+
+const _crop = {
+  figure:    null,
+  imgEl:     null,   // DOM <img>（src 更新用）
+  canvasImg: null,   // キャンバス描画用の Image オブジェクト
+  scale:     1,
+  rect:      { x: 0, y: 0, w: 100, h: 100 },
+  drag:      null,   // { type, startX, startY, initRect }
+};
+
+function _cropClientToCanvas(e) {
+  const c = els.cropCanvas;
+  const r = c.getBoundingClientRect();
+  const src = e.touches ? e.touches[0] : e;
+  return {
+    x: (src.clientX - r.left) * (c.width  / r.width),
+    y: (src.clientY - r.top)  * (c.height / r.height),
+  };
+}
+
+function _cropHitType(px, py) {
+  const { x, y, w, h } = _crop.rect;
+  const H = HANDLE_HIT;
+  if (Math.abs(px - x)     < H && Math.abs(py - y)     < H) return "nw";
+  if (Math.abs(px - x - w) < H && Math.abs(py - y)     < H) return "ne";
+  if (Math.abs(px - x)     < H && Math.abs(py - y - h) < H) return "sw";
+  if (Math.abs(px - x - w) < H && Math.abs(py - y - h) < H) return "se";
+  if (px > x && px < x + w && py > y && py < y + h) return "move";
+  return "new";
+}
+
+function _cropClamp({ x, y, w, h }) {
+  const W = els.cropCanvas.width, H = els.cropCanvas.height;
+  x = Math.max(0, x); y = Math.max(0, y);
+  w = Math.max(4, w); h = Math.max(4, h);
+  if (x + w > W) w = W - x;
+  if (y + h > H) h = H - y;
+  return { x, y, w, h };
+}
+
+function drawCropCanvas() {
+  const canvas = els.cropCanvas;
+  const ctx    = canvas.getContext("2d");
+  const W = canvas.width, H = canvas.height;
+  const img = _crop.canvasImg;   // 専用 Image オブジェクトを使用
+  if (!img) return;
+
+  ctx.clearRect(0, 0, W, H);
+  ctx.drawImage(img, 0, 0, W, H);
+
+  const { x, y, w, h } = _crop.rect;
+
+  // 外側を暗く
+  ctx.save();
+  ctx.fillStyle = "rgba(0,0,0,0.55)";
+  ctx.beginPath();
+  ctx.rect(0, 0, W, H);
+  ctx.rect(x, y, w, h);
+  ctx.fill("evenodd");
+  ctx.restore();
+
+  // 選択範囲の画像を再描画（明るく見せる）
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(x, y, w, h);
+  ctx.clip();
+  ctx.drawImage(img, 0, 0, W, H);
+  ctx.restore();
+
+  // 枠線
+  ctx.strokeStyle = "#fff";
+  ctx.lineWidth   = 1.5;
+  ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+
+  // 三分割線
+  ctx.strokeStyle = "rgba(255,255,255,0.35)";
+  ctx.lineWidth   = 0.75;
+  ctx.beginPath();
+  for (const t of [1/3, 2/3]) {
+    ctx.moveTo(x + w * t, y);     ctx.lineTo(x + w * t, y + h);
+    ctx.moveTo(x,         y + h * t); ctx.lineTo(x + w, y + h * t);
+  }
+  ctx.stroke();
+
+  // コーナーハンドル
+  ctx.fillStyle  = "#fff";
+  ctx.shadowColor = "rgba(0,0,0,0.4)";
+  ctx.shadowBlur  = 4;
+  const hs = HANDLE_SIZE;
+  [[x, y], [x + w - hs, y], [x, y + h - hs], [x + w - hs, y + h - hs]].forEach(([hx, hy]) => {
+    ctx.fillRect(hx, hy, hs, hs);
+  });
+  ctx.shadowBlur = 0;
+}
+
+function openCropModal(figure) {
+  const imgEl = figure.querySelector("img.inline-media");
+  if (!imgEl) return;
+
+  _crop.figure    = figure;
+  _crop.imgEl     = imgEl;
+  _crop.canvasImg = null;
+
+  // ① モーダルを先に開く（hidden な要素内のキャンバスへの描画は
+  //    ブラウザによって無視されることがあるため、先に表示してから描画する）
+  els.cropCanvas.width  = 10;
+  els.cropCanvas.height = 10;
+  els.cropOverlay.hidden = false;
+
+  // ② cache:'no-store' で 304 を完全に回避し、常にフルボディを取得する。
+  //    fetch が 304 を返すとボディが空になり blob が空 → canvas が黒くなる。
+  //    Blob → ObjectURL → Image.onload 経路は CORS タント・デコード未完了も回避できる。
+  fetch(imgEl.src, { cache: 'no-store' })
+    .then(r => r.blob())
+    .then(blob => {
+      if (blob.size === 0) throw new Error("画像データが空です");
+      return new Promise((resolve, reject) => {
+        const objUrl = URL.createObjectURL(blob);
+        const img    = new Image();
+        img.onload  = () => { URL.revokeObjectURL(objUrl); resolve(img); };
+        img.onerror = () => { URL.revokeObjectURL(objUrl); reject(new Error("デコード失敗")); };
+        img.src = objUrl;
+      });
+    })
+    .then(img => {
+      _crop.canvasImg = img;
+
+      const nw = img.naturalWidth;
+      const nh = img.naturalHeight;
+      if (nw === 0 || nh === 0) throw new Error("画像サイズが0です");
+
+      const maxW = Math.min(window.innerWidth  * 0.9  - 56, 900);
+      const maxH = Math.min(window.innerHeight * 0.72 - 80, 700);
+      _crop.scale = Math.min(maxW / nw, maxH / nh, 1);
+
+      const cw = Math.round(nw * _crop.scale);
+      const ch = Math.round(nh * _crop.scale);
+      els.cropCanvas.width  = cw;
+      els.cropCanvas.height = ch;
+
+      _crop.rect = { x: 0, y: 0, w: cw, h: ch };
+      _crop.drag = null;
+      drawCropCanvas();
+    })
+    .catch(err => {
+      closeCropModal();
+      showToast("画像の読み込みに失敗しました: " + err.message);
+    });
+}
+
+function closeCropModal() {
+  els.cropOverlay.hidden = true;
+  if (_crop.canvasImg instanceof ImageBitmap) _crop.canvasImg.close();
+  _crop.figure    = null;
+  _crop.canvasImg = null;
+  _crop.drag      = null;
+}
+
+// ポインターイベント（マウス + タッチ共通）
+els.cropCanvas.addEventListener("pointerdown", e => {
+  e.preventDefault();
+  els.cropCanvas.setPointerCapture(e.pointerId);
+  const { x, y } = _cropClientToCanvas(e);
+  const type = _cropHitType(x, y);
+  _crop.drag = { type, startX: x, startY: y, initRect: { ..._crop.rect } };
+});
+
+els.cropCanvas.addEventListener("pointermove", e => {
+  if (!_crop.drag) {
+    // カーソル形状を変える
+    const { x, y } = _cropClientToCanvas(e);
+    const cursors = { nw: "nw-resize", ne: "ne-resize", sw: "sw-resize", se: "se-resize", move: "move", new: "crosshair" };
+    els.cropCanvas.style.cursor = cursors[_cropHitType(x, y)] ?? "crosshair";
+    return;
+  }
+  e.preventDefault();
+  const { x, y } = _cropClientToCanvas(e);
+  const dx = x - _crop.drag.startX;
+  const dy = y - _crop.drag.startY;
+  const r  = _crop.drag.initRect;
+  const W  = els.cropCanvas.width, H = els.cropCanvas.height;
+
+  let nr;
+  switch (_crop.drag.type) {
+    case "new": {
+      const lx = Math.min(_crop.drag.startX, x);
+      const ly = Math.min(_crop.drag.startY, y);
+      nr = _cropClamp({ x: lx, y: ly, w: Math.abs(dx) || 4, h: Math.abs(dy) || 4 });
+      break;
+    }
+    case "move": {
+      const nx = Math.max(0, Math.min(r.x + dx, W - r.w));
+      const ny = Math.max(0, Math.min(r.y + dy, H - r.h));
+      nr = { x: nx, y: ny, w: r.w, h: r.h };
+      break;
+    }
+    case "nw": nr = _cropClamp({ x: r.x + dx, y: r.y + dy, w: r.w - dx, h: r.h - dy }); break;
+    case "ne": nr = _cropClamp({ x: r.x,      y: r.y + dy, w: r.w + dx, h: r.h - dy }); break;
+    case "sw": nr = _cropClamp({ x: r.x + dx, y: r.y,      w: r.w - dx, h: r.h + dy }); break;
+    case "se": nr = _cropClamp({ x: r.x,      y: r.y,      w: r.w + dx, h: r.h + dy }); break;
+    default:   nr = _crop.rect;
+  }
+  _crop.rect = nr;
+  drawCropCanvas();
+});
+
+els.cropCanvas.addEventListener("pointerup",     () => { _crop.drag = null; });
+els.cropCanvas.addEventListener("pointercancel", () => { _crop.drag = null; });
+
+async function confirmCrop() {
+  const { figure, imgEl, scale, rect } = _crop;
+  if (!figure || !imgEl) return;
+
+  const nx = Math.round(rect.x / scale);
+  const ny = Math.round(rect.y / scale);
+  const nw = Math.round(rect.w / scale);
+  const nh = Math.round(rect.h / scale);
+  if (nw < 2 || nh < 2) { showToast("範囲が小さすぎます。"); return; }
+  pushUndoSnapshot(snapshotFromNote(getSelectedNote()));
+
+  const tmpCanvas = document.createElement("canvas");
+  tmpCanvas.width  = nw;
+  tmpCanvas.height = nh;
+  // canvasImg（proxyImg）でトリミング描画。DOM <img> は CORS タイントの懸念があるため使わない
+  const drawSrc = _crop.canvasImg || imgEl;
+  tmpCanvas.getContext("2d").drawImage(drawSrc, nx, ny, nw, nh, 0, 0, nw, nh);
+
+  closeCropModal();
+
+  try {
+    const blob = await new Promise((res, rej) =>
+      tmpCanvas.toBlob(b => b ? res(b) : rej(new Error("変換失敗")), "image/png")
+    );
+    const file = new File([blob], "cropped.png", { type: "image/png" });
+    const fd   = new FormData();
+    fd.append("file", file);
+    const item = await api(`/api/notes/${state.selectedId}/media`, { method: "POST", body: fd });
+
+    // DOM の img src を新しいファイルに差し替え
+    imgEl.addEventListener("load", () => scheduleMediaCaretSync(), { once: true });
+    imgEl.src = `/media/${item.filename}`;
+    imgEl.alt = item.original_name;
+    scheduleMediaCaretSync();
+
+    scheduleSave();
+    showToast("トリミングしました。");
+  } catch (err) {
+    showToast("トリミングに失敗しました: " + err.message);
+  }
+}
+
+els.cropOk    .addEventListener("click", confirmCrop);
+els.cropCancel.addEventListener("click", closeCropModal);
+els.cropOverlay.addEventListener("click", e => {
+  if (e.target === els.cropOverlay) closeCropModal();
+});
+
+// ── メディアコンテキストメニュー ──────────────────────────────────────────────
+
+function showMediaCtxMenu(x, y, figure) {
+  state.mediaCmFigure = figure;
+  const isImage = !!figure.querySelector("img.inline-media");
+  if (els.mediaSizeSection) els.mediaSizeSection.hidden = !isImage;
+
+  const menu = els.mediaContextMenu;
+  menu.hidden = false;
+  menu.style.left = `${x}px`;
+  menu.style.top  = `${y}px`;
+  const mw = menu.offsetWidth, mh = menu.offsetHeight;
+  if (x + mw > window.innerWidth)  menu.style.left = `${window.innerWidth  - mw - 6}px`;
+  if (y + mh > window.innerHeight) menu.style.top  = `${window.innerHeight - mh - 6}px`;
+}
+
+function hideMediaCtxMenu() {
+  els.mediaContextMenu.hidden = true;
+  state.mediaCmFigure = null;
+}
+
+// クリップボードへ書き込めるのは image/png のみのブラウザが多いため、
+// 元画像が PNG でなければ canvas 経由で PNG に変換する。
+async function fetchImageAsPngBlob(src) {
+  const res = await fetch(src);
+  const blob = await res.blob();
+  if (blob.type === "image/png") return blob;
+
+  const url = URL.createObjectURL(blob);
+  try {
+    const image = await new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error("画像の読み込みに失敗しました。"));
+      img.src = url;
+    });
+    const canvas = document.createElement("canvas");
+    canvas.width = image.naturalWidth;
+    canvas.height = image.naturalHeight;
+    canvas.getContext("2d").drawImage(image, 0, 0);
+    return await new Promise((resolve, reject) => {
+      canvas.toBlob(b => b ? resolve(b) : reject(new Error("PNG変換に失敗しました。")), "image/png");
+    });
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+async function copyFigureImageToClipboard(figure) {
+  const img = figure.querySelector("img.inline-media");
+  if (!img) {
+    showToast("コピーできる画像がありません。");
+    return;
+  }
+  if (!navigator.clipboard || !window.ClipboardItem) {
+    showToast("このブラウザは画像のコピーに対応していません。");
+    return;
+  }
+  try {
+    await navigator.clipboard.write([
+      new ClipboardItem({ "image/png": fetchImageAsPngBlob(img.src) })
+    ]);
+    showToast("画像をコピーしました。");
+  } catch (err) {
+    showToast("画像のコピーに失敗しました: " + err.message);
+  }
+}
+
+els.mediaContextMenu.addEventListener("click", e => {
+  const btn = e.target.closest("[data-media-action], [data-size]");
+  if (!btn || !state.mediaCmFigure) return;
+
+  const action = btn.dataset.mediaAction;
+
+  if (action === "copy") {
+    const figure = state.mediaCmFigure;
+    hideMediaCtxMenu();
+    copyFigureImageToClipboard(figure);
+    return;
+  }
+
+  if (action === "size" || btn.dataset.size) {
+    const figure = state.mediaCmFigure;
+    pushUndoSnapshot(snapshotFromNote(getSelectedNote()));
+    figure.dataset.size = btn.dataset.size;
+    ensureAnchorAfterFigure(figure);
+    scheduleMediaCaretSync();
+    hideMediaCtxMenu();
+    scheduleSave();
+    return;
+  }
+
+  if (action === "trim") {
+    const figure = state.mediaCmFigure;
+    hideMediaCtxMenu();
+    openCropModal(figure);
+    return;
+  }
+
+  if (action === "delete") {
+    const figure = state.mediaCmFigure;
+    pushUndoSnapshot(snapshotFromNote(getSelectedNote()));
+    hideMediaCtxMenu();
+    figure.remove();
+    normalizeMediaCaretAnchors();
+    updateEmptyState();
+    scheduleSave();
+    return;
+  }
+});
+
+// ── contenteditable イベント委任 ──────────────────────────────────────────────
+
+els.contentInput.addEventListener("click", e => {
+  const caretAnchor = e.target.closest(".media-caret-anchor");
+  if (caretAnchor) {
+    placeCaretInMediaCaretAnchor(caretAnchor);
+    return;
+  }
+
+  const figure = e.target.closest(".inline-media-figure");
+  if (figure) {
+    const side = getMediaSideFromPoint(figure, e.clientX);
+    if (side) {
+      e.preventDefault();
+      placeCaretBesideFigure(figure, side);
+      return;
+    }
+  }
+
+  const nearby = getMediaFigureNearPoint(e.clientX, e.clientY);
+  if (nearby) {
+    placeCaretBesideFigure(nearby.figure, nearby.side);
+    return;
+  }
+
+  clearActiveMediaCaret();
+
+  // 画像クリック → ライトボックスで表示
+  if (e.target.classList.contains("inline-media") && e.target.tagName === "IMG") {
+    e.preventDefault();
+    openLightbox(e.target);
+  }
+});
+
+// 右クリック → メディアコンテキストメニュー
+els.contentInput.addEventListener("contextmenu", e => {
+  const figure = e.target.closest(".inline-media-figure");
+  if (!figure) return;
+  e.preventDefault(); e.stopPropagation();
+  hideCtxMenu();
+  showMediaCtxMenu(e.clientX, e.clientY, figure);
+});
+
+els.contentInput.addEventListener("dragstart", e => {
+  if (!e.target.closest(".inline-media-figure")) return;
+  e.preventDefault();
+  e.stopPropagation();
+});
+
+els.contentInput.addEventListener("dragover", e => {
+  if (e.dataTransfer.types.includes("Files")) return;
+  e.preventDefault();
+});
+
+els.contentInput.addEventListener("drop", e => {
+  if (e.dataTransfer.types.includes("Files")) return;
+  e.preventDefault();
+  e.stopPropagation();
+});
+
+// ── ツリーコンテキストメニュー ────────────────────────────────────────────────
+
+function showCtxMenu(x, y, noteId) {
+  state.contextNoteId = noteId;
+  const note  = getNotes().find(n => n.id === noteId);
+  const pinBtn = els.contextMenu.querySelector('[data-action="toggle-pin"]');
+  if (pinBtn) {
+    const canPin = note?.parent_id === null;
+    pinBtn.hidden = !canPin;
+    pinBtn.textContent = note?.pinned ? "📌　ピン留め解除" : "📌　ピン留め";
+  }
+  const checkItem = els.contextMenu.querySelector('[data-action="toggle-check"]');
+  if (checkItem) {
+    checkItem.textContent = note?.checked ? "✅　チェックを外す" : "✅　チェックを付ける";
+  }
+  const siblingTopBtn = els.contextMenu.querySelector('[data-action="move-sibling-top"]');
+  if (siblingTopBtn) {
+    siblingTopBtn.hidden = false;
+  }
+  const siblingBottomBtn = els.contextMenu.querySelector('[data-action="move-sibling-bottom"]');
+  if (siblingBottomBtn) {
+    siblingBottomBtn.hidden = false;
+  }
+  els.contextMenu.hidden = false;
+  els.contextMenu.style.left = `${x}px`;
+  els.contextMenu.style.top  = `${y}px`;
+  const mw = els.contextMenu.offsetWidth, mh = els.contextMenu.offsetHeight;
+  if (x + mw > window.innerWidth)  els.contextMenu.style.left = `${window.innerWidth  - mw - 6}px`;
+  if (y + mh > window.innerHeight) els.contextMenu.style.top  = `${window.innerHeight - mh - 6}px`;
+}
+
+function hideCtxMenu() { els.contextMenu.hidden = true; state.contextNoteId = null; }
+
+function startInlineRename(noteId) {
+  selectNote(noteId);
+  const row = els.tree.querySelector(`[data-id="${noteId}"]`);
+  if (!row) { els.titleInput.focus(); els.titleInput.select(); return; }
+  const span = row.querySelector(".tree-title");
+  if (!span) return;
+  const orig  = span.textContent;
+  const input = document.createElement("input");
+  input.className = "tree-rename-input";
+  input.value = orig;
+  span.replaceWith(input);
+  input.focus(); input.select();
+  let done = false;
+  async function commit() {
+    if (done) return; done = true;
+    const val = input.value.trim() || orig;
+    span.textContent = val; input.replaceWith(span);
+    if (val !== orig) {
+      try {
+        pushUndoSnapshot(snapshotFromNote(getNotes().find(n => n.id === noteId)));
+        await updateNote(noteId, { title: val });
+        showToast("名前を変更しました。");
+      }
+      catch (e) { showToast(e.message); await loadNotes(); }
+    }
+  }
+  function cancel() { if (done) return; done = true; span.textContent = orig; input.replaceWith(span); }
+  input.addEventListener("blur", commit);
+  input.addEventListener("keydown", e => {
+    if (e.key === "Enter")  { e.preventDefault(); input.blur(); }
+    if (e.key === "Escape") { input.removeEventListener("blur", commit); cancel(); }
+  });
+}
+
+els.contextMenu.addEventListener("click", async e => {
+  const btn = e.target.closest("[data-action]");
+  if (!btn || btn.disabled) return;
+  const action = btn.dataset.action;
+  const id     = state.contextNoteId;
+  hideCtxMenu();
+  if (!id) return;
+  switch (action) {
+    case "rename":    startInlineRename(id); break;
+    case "add-child": await createNote(id); break;
+    case "toggle-check": await toggleCheckedNote(id); break;
+    case "toggle-pin": await togglePinnedNote(id); break;
+    case "move-sibling-top": await moveNoteToSiblingEdge(id, "start"); break;
+    case "move-sibling-bottom": await moveNoteToSiblingEdge(id, "end"); break;
+    case "delete":
+      state.selectedId = id;
+      await deleteSelectedNote();
+      break;
+  }
+});
+
+// ── Global events ─────────────────────────────────────────────────────────────
+
+document.addEventListener("click", e => {
+  if (!els.contextMenu.hidden      && !els.contextMenu.contains(e.target))      hideCtxMenu();
+  if (!els.mediaContextMenu.hidden && !els.mediaContextMenu.contains(e.target)) hideMediaCtxMenu();
+});
+
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape") {
+    closeLightbox();
+    closeCropModal();
+    closeTemplatesPanel();
+    hideCtxMenu();
+    hideMediaCtxMenu();
+    resolveConfirm(false);
+  }
+  const isUndo = (e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "z";
+  if (isUndo) {
+    e.preventDefault();
+    undoLastChange();
+    return;
+  }
+  const isSave = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s";
+  if (isSave) {
+    e.preventDefault();
+    clearTimeout(state.saveTimer);
+    state.saveTimer = setTimeout(() => scheduleSave(), 0);
+  }
+});
+
+document.addEventListener("dragend", () => {
+  document.body.classList.remove("is-dragging");
+  state.isDraggingNote = false;
+  clearTreeDropHighlights();
+});
+
+document.addEventListener("selectionchange", updateActiveMediaCaretFromSelection);
+
+// ── ボタン / 入力バインド ─────────────────────────────────────────────────────
+
+els.titleInput.addEventListener("input", scheduleSave);
+els.checkBtn.addEventListener("click", () => {
+  if (!state.selectedId) { showToast("先にメモを選択してください。"); return; }
+  toggleCheckedNote(state.selectedId);
+});
+
+els.contentInput.addEventListener("focus", () => {
+  els.contentInput.classList.add("is-focused");
+});
+els.contentInput.addEventListener("click", () => {
+  els.contentInput.classList.add("is-focused");
+});
+els.contentInput.addEventListener("blur", () => {
+  els.contentInput.classList.remove("is-focused");
+  clearActiveMediaCaret();
+});
+els.contentInput.addEventListener("compositionstart", () => { _isComposing = true; redirectMediaCaretTyping(); });
+els.contentInput.addEventListener("compositionend",   () => { _isComposing = false; repairMediaCaretAfterEdit(); scheduleSave(); });
+els.contentInput.addEventListener("keydown", rememberMediaCaretRepair);
+els.contentInput.addEventListener("keydown", e => {
+  if (e.isComposing || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.key.length !== 1) return;
+  redirectMediaCaretTyping();
+});
+els.contentInput.addEventListener("input", () => {
+  repairMediaCaretAfterEdit();
+  updateEmptyState();
+  if (!_isComposing) scheduleSave();
+});
+els.contentInput.addEventListener("keyup", e => {
+  if (e.key === "Backspace" || e.key === "Delete") repairMediaCaretAfterEdit();
+});
+
+els.searchInput.addEventListener("input", renderTree);
+
+els.newRootBtn .addEventListener("click", () => createNote(null));
+els.undoBtn.addEventListener("click", undoLastChange);
+els.addChildBtn.addEventListener("click", () => {
+  if (!state.selectedId) { showToast("先にメモを選択してください。"); return; }
+  createNote(state.selectedId);
+});
+els.deleteBtn.addEventListener("click", deleteSelectedNote);
+
+// ── メディア添付 ──────────────────────────────────────────────────────────────
+
+els.mediaBtn.addEventListener("click", () => {
+  if (!state.selectedId) { showToast("先にメモを選択してください。"); return; }
+  els.mediaInput.click();
+});
+els.mediaInput.addEventListener("change", e => {
+  if (!state.selectedId) return;
+  uploadMedia(state.selectedId, e.target.files);
+  e.target.value = "";
+});
+
+els.editorArea.addEventListener("dragover", e => {
+  if (!e.dataTransfer.types.includes("Files")) return;
+  e.preventDefault();
+  els.editorArea.classList.add("media-drag-over");
+});
+els.editorArea.addEventListener("dragleave", e => {
+  if (!els.editorArea.contains(e.relatedTarget))
+    els.editorArea.classList.remove("media-drag-over");
+});
+els.editorArea.addEventListener("drop", e => {
+  if (state.isDraggingNote) { e.preventDefault(); return; }
+  if (!e.dataTransfer.files.length) return;
+  e.preventDefault();
+  els.editorArea.classList.remove("media-drag-over");
+  if (!state.selectedId) { showToast("先にメモを選択してください。"); return; }
+  uploadMedia(state.selectedId, e.dataTransfer.files);
+});
+
+els.contentInput.addEventListener("paste", e => {
+  const items      = [...(e.clipboardData?.items ?? [])];
+  const mediaItems = items.filter(i => i.type.startsWith("image/") || i.type.startsWith("video/"));
+  if (mediaItems.length > 0) {
+    e.preventDefault();
+    if (!state.selectedId) { showToast("先にメモを選択してください。"); return; }
+    uploadMedia(state.selectedId, mediaItems.map(i => i.getAsFile()).filter(Boolean));
+    return;
+  }
+  const text = e.clipboardData.getData("text/plain");
+  if (text) { e.preventDefault(); document.execCommand("insertText", false, text); }
+});
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
+
+loadNotes().catch(e => showToast(e.message));
