@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>メール認証｜Memo</title>
+  <meta name="description" content="Memoのメールアドレス確認ページです。">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/auth-action.css') }}">
+</head>
+<body>
+  <main class="auth-action-page">
+    <section class="auth-action-card" aria-live="polite">
+      <p class="auth-action-brand">Memo</p>
+      <h1 id="actionTitle">メールアドレスの確認</h1>
+
+      <div id="actionPending" class="action-state">
+        <p class="action-lead">アカウントを安全に使うため、メールアドレスを確認してください。</p>
+        <button id="completeVerificationBtn" class="action-primary" type="button">認証を完了する</button>
+      </div>
+
+      <div id="actionSuccess" class="action-state" hidden>
+        <div class="action-icon success" aria-hidden="true">✓</div>
+        <h2>メール認証が完了しました</h2>
+        <p>Memoに戻って「認証状況を更新」を押すと、アカウント登録を完了できます。</p>
+        <a class="action-primary action-link" href="/">Memoに戻る</a>
+      </div>
+
+      <div id="actionError" class="action-state" hidden>
+        <div class="action-icon error" aria-hidden="true">!</div>
+        <h2>認証できませんでした</h2>
+        <p id="actionErrorMessage">リンクの有効期限が切れているか、すでに使用済みです。Memoに戻って確認メールを再送してください。</p>
+        <a class="action-secondary action-link" href="/">Memoに戻る</a>
+      </div>
+    </section>
+  </main>
+
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script>
+    const firebaseConfig = {{ firebase_config | tojson }};
+    window.FIREBASE_READY = !!(firebaseConfig.apiKey);
+    if (window.FIREBASE_READY) firebase.initializeApp(firebaseConfig);
+  </script>
+  <script src="{{ url_for('static', filename='js/auth_action.js') }}"></script>
+</body>
+</html>

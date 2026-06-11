@@ -58,7 +58,49 @@ const els = {
   cropCanvas:       document.getElementById("cropCanvas"),
   cropOk:           document.getElementById("cropOk"),
   cropCancel:       document.getElementById("cropCancel"),
+  // Auth
+  appShell:           document.querySelector(".app-shell"),
+  authOverlay:        document.getElementById("authOverlay"),
+  authDialog:         document.getElementById("authDialog"),
+  authNotConfigured:  document.getElementById("authNotConfigured"),
+  authFormWrap:       document.getElementById("authFormWrap"),
+  authForm:           document.getElementById("authForm"),
+  authTitle:          document.getElementById("authTitle"),
+  authTabs:           document.querySelectorAll(".auth-tab"),
+  authEmail:          document.getElementById("authEmail"),
+  authPassword:       document.getElementById("authPassword"),
+  authPasswordField:  document.getElementById("authPasswordField"),
+  authShowPassword:   document.getElementById("authShowPassword"),
+  authShowPasswordField: document.getElementById("authShowPasswordField"),
+  authRemember:       document.getElementById("authRemember"),
+  authRememberField:  document.getElementById("authRememberField"),
+  authError:          document.getElementById("authError"),
+  authInfo:           document.getElementById("authInfo"),
+  authSubmitBtn:      document.getElementById("authSubmitBtn"),
+  authForgotLink:     document.getElementById("authForgotLink"),
+  authBackToLoginLink: document.getElementById("authBackToLoginLink"),
+  authVerifyPanel:    document.getElementById("authVerifyPanel"),
+  authVerifyEmail:    document.getElementById("authVerifyEmail"),
+  authVerifyStatus:   document.getElementById("authVerifyStatus"),
+  authVerifyResendBtn: document.getElementById("authVerifyResendBtn"),
+  authVerifyRefreshBtn: document.getElementById("authVerifyRefreshBtn"),
+  authVerifyLogoutBtn: document.getElementById("authVerifyLogoutBtn"),
+  authVerifyDeleteBtn: document.getElementById("authVerifyDeleteBtn"),
+  // Account menu
+  accountBtn:            document.getElementById("accountBtn"),
+  accountMenu:           document.getElementById("accountMenu"),
+  accountMenuEmail:      document.getElementById("accountMenuEmail"),
+  accountMenuStatus:     document.getElementById("accountMenuStatus"),
+  resendVerificationBtn: document.getElementById("resendVerificationBtn"),
+  refreshStatusBtn:      document.getElementById("refreshStatusBtn"),
+  logoutBtn:             document.getElementById("logoutBtn"),
+  deleteAccountBtn:      document.getElementById("deleteAccountBtn"),
 };
+
+// ── Firebase Auth ─────────────────────────────────────────────────────────────
+
+const auth = (window.FIREBASE_READY && typeof firebase !== "undefined") ? firebase.auth() : null;
+if (auth) auth.languageCode = "ja";
 
 // ── Toast ─────────────────────────────────────────────────────────────────────
 
@@ -96,9 +138,18 @@ function resolveConfirm(result) {
 // ── API ───────────────────────────────────────────────────────────────────────
 
 async function api(path, options = {}) {
-  const res  = await fetch(path, options);
+  const headers = { ...(options.headers || {}) };
+  if (auth?.currentUser) {
+    headers["Authorization"] = `Bearer ${await auth.currentUser.getIdToken()}`;
+  }
+  const res  = await fetch(path, { ...options, headers });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || "通信に失敗しました。");
+  if (!res.ok) {
+    if (res.status === 403 && data.code === "email-not-verified" && auth?.currentUser) {
+      showVerificationScreen(auth.currentUser, data.error);
+    }
+    throw new Error(data.error || "通信に失敗しました。");
+  }
   return data;
 }
 
@@ -2111,6 +2162,9 @@ els.contextMenu.addEventListener("click", async e => {
 document.addEventListener("click", e => {
   if (!els.contextMenu.hidden      && !els.contextMenu.contains(e.target))      hideCtxMenu();
   if (!els.mediaContextMenu.hidden && !els.mediaContextMenu.contains(e.target)) hideMediaCtxMenu();
+  if (!els.accountMenu.hidden && !els.accountMenu.contains(e.target) && !els.accountBtn.contains(e.target)) {
+    els.accountMenu.hidden = true;
+  }
 });
 
 document.addEventListener("keydown", e => {
@@ -2120,6 +2174,7 @@ document.addEventListener("keydown", e => {
     closeTemplatesPanel();
     hideCtxMenu();
     hideMediaCtxMenu();
+    els.accountMenu.hidden = true;
     resolveConfirm(false);
   }
   const isUndo = (e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "z";
@@ -2232,6 +2287,335 @@ els.contentInput.addEventListener("paste", e => {
   if (text) { e.preventDefault(); document.execCommand("insertText", false, text); }
 });
 
+// ── Auth UI ───────────────────────────────────────────────────────────────────
+
+let authMode = "login";
+let authFlowInProgress = false;
+
+const EMAIL_VERIFICATION_REQUIRED =
+  "メールアドレスの確認が必要です。送信したメール内のリンクを開いて認証を完了してからログインしてください。メールが届かない場合は迷惑メールフォルダを確認してください。";
+const EMAIL_VERIFICATION_SENT =
+  "確認メールを送信しました。メール内のリンクで認証を完了してからログインしてください。メールが届かない場合は迷惑メールフォルダを確認してください。";
+const EMAIL_DELIVERY_HELP =
+  "メールが届かない場合は迷惑メールフォルダを確認してください。";
+
+const AUTH_ERROR_MESSAGES = {
+  "auth/email-already-in-use":   "このメールアドレスは既に登録されています。",
+  "auth/invalid-email":          "メールアドレスの形式が正しくありません。",
+  "auth/user-disabled":          "このアカウントは無効化されています。",
+  "auth/user-not-found":         "メールアドレスまたはパスワードが正しくありません。",
+  "auth/wrong-password":         "メールアドレスまたはパスワードが正しくありません。",
+  "auth/invalid-credential":     "メールアドレスまたはパスワードが正しくありません。",
+  "auth/missing-password":       "パスワードを入力してください。",
+  "auth/weak-password":          "パスワードは6文字以上で入力してください。",
+  "auth/too-many-requests":      "試行回数が多すぎます。しばらくしてからお試しください。",
+  "auth/network-request-failed": "通信に失敗しました。ネットワークをご確認ください。",
+  "auth/requires-recent-login":  "セキュリティのため、再度ログインしてからお試しください。",
+};
+
+function translateAuthError(err) {
+  return AUTH_ERROR_MESSAGES[err?.code] || err?.message || "エラーが発生しました。";
+}
+
+function showAuthError(message) {
+  els.authInfo.hidden       = true;
+  els.authError.textContent = message;
+  els.authError.hidden      = false;
+}
+
+function showAuthInfo(message) {
+  els.authError.hidden     = true;
+  els.authInfo.textContent = message;
+  els.authInfo.hidden      = false;
+}
+
+function showVerificationStatus(message) {
+  els.authVerifyStatus.textContent = message;
+  els.authVerifyStatus.hidden = false;
+}
+
+function updatePasswordVisibility() {
+  els.authPassword.type = els.authShowPassword.checked ? "text" : "password";
+}
+
+function showAuthScreen() {
+  els.appShell.hidden    = true;
+  els.authOverlay.hidden = false;
+  els.authDialog.classList.remove("is-verifying");
+  els.authVerifyPanel.hidden = true;
+  els.authNotConfigured.hidden = true;
+  setAuthMode("login");
+  if (!window.FIREBASE_READY) {
+    els.authNotConfigured.hidden = false;
+    els.authFormWrap.hidden      = true;
+  }
+}
+
+function showApp() {
+  els.authOverlay.hidden = true;
+  els.appShell.hidden    = false;
+}
+
+function showVerificationScreen(user, message = EMAIL_VERIFICATION_REQUIRED) {
+  els.appShell.hidden = true;
+  els.authOverlay.hidden = false;
+  els.authDialog.classList.add("is-verifying");
+  els.authNotConfigured.hidden = true;
+  els.authFormWrap.hidden = true;
+  els.authVerifyPanel.hidden = false;
+  els.authTitle.textContent = "アカウント";
+  els.authVerifyEmail.textContent = user?.email || "";
+  els.authVerifyStatus.hidden = true;
+  if (message) showVerificationStatus(message);
+}
+
+function setAuthMode(mode) {
+  authMode = mode;
+  els.authDialog.classList.remove("is-verifying");
+  els.authVerifyPanel.hidden = true;
+  els.authFormWrap.hidden = false;
+  els.authError.hidden = true;
+  els.authInfo.hidden  = true;
+  els.authTabs.forEach(tab => tab.classList.toggle("active", tab.dataset.authTab === mode));
+
+  if (mode === "forgot") {
+    els.authTitle.textContent      = "パスワード再設定";
+    els.authPasswordField.hidden   = true;
+    els.authPassword.required      = false;
+    els.authShowPasswordField.hidden = true;
+    els.authShowPassword.checked   = false;
+    updatePasswordVisibility();
+    els.authRememberField.hidden   = true;
+    els.authSubmitBtn.textContent  = "再設定メールを送信";
+    els.authForgotLink.hidden      = true;
+    els.authBackToLoginLink.hidden = false;
+  } else {
+    els.authTitle.textContent      = mode === "register" ? "新規登録" : "ログイン";
+    els.authPasswordField.hidden   = false;
+    els.authPassword.required      = true;
+    els.authShowPasswordField.hidden = false;
+    els.authRememberField.hidden   = false;
+    els.authSubmitBtn.textContent  = mode === "register" ? "登録" : "ログイン";
+    els.authForgotLink.hidden      = mode !== "login";
+    els.authBackToLoginLink.hidden = true;
+  }
+}
+
+function applyAuthPersistence() {
+  const persistence = els.authRemember.checked
+    ? firebase.auth.Auth.Persistence.LOCAL
+    : firebase.auth.Auth.Persistence.SESSION;
+  return auth.setPersistence(persistence);
+}
+
+function emailActionSettings() {
+  return {
+    url: `${window.location.origin}/`,
+    handleCodeInApp: false,
+  };
+}
+
+function sendVerificationEmail(user) {
+  return user.sendEmailVerification(emailActionSettings());
+}
+
+async function resendVerificationSilently(user) {
+  if (!user || user.emailVerified) return true;
+  try {
+    await sendVerificationEmail(user);
+    return true;
+  } catch (e) {
+    if (e?.code === "auth/too-many-requests") return false;
+    throw e;
+  }
+}
+
+function updateAccountUI(user) {
+  if (!user) return;
+  const needsVerification = !user.emailVerified;
+  els.accountMenuEmail.textContent  = user.email || "";
+  els.accountMenuStatus.textContent = needsVerification ? "⚠️ メール未確認" : "✅ メール確認済み";
+  els.resendVerificationBtn.hidden  = !needsVerification;
+  els.refreshStatusBtn.hidden       = !needsVerification;
+}
+
+async function handleResendVerification() {
+  els.accountMenu.hidden = true;
+  try {
+    const user = auth.currentUser;
+    if (!user) return;
+    await user.reload();
+    if (user.emailVerified) {
+      updateAccountUI(user);
+      await user.getIdToken(true);
+      showApp();
+      try { await loadNotes(); } catch (e) { showToast(e.message); }
+      showToast("メール確認済みです。");
+      return;
+    }
+    await sendVerificationEmail(user);
+    if (!els.authVerifyPanel.hidden) showVerificationStatus(`確認メールを送信しました。${EMAIL_DELIVERY_HELP}`);
+    showToast("確認メールを送信しました。");
+  } catch (e) { showToast(translateAuthError(e)); }
+}
+
+async function handleRefreshStatus() {
+  try {
+    const user = auth.currentUser;
+    if (!user) return;
+    await user.reload();
+    updateAccountUI(user);
+    if (user.emailVerified) {
+      await user.getIdToken(true);
+      showApp();
+      try { await loadNotes(); } catch (e) { showToast(e.message); }
+      showToast("メール確認済みです。");
+    } else {
+      showVerificationScreen(user, "まだメール確認が完了していません。メールのリンクを開いてから更新してください。");
+      showToast("まだメール確認が完了していません。");
+    }
+  } catch (e) { showToast(translateAuthError(e)); }
+}
+
+async function handleLogout() {
+  els.accountMenu.hidden = true;
+  try {
+    await auth.signOut();
+  } catch (e) { showToast(translateAuthError(e)); }
+}
+
+async function handleDeleteAccount() {
+  els.accountMenu.hidden = true;
+  const ok = await showConfirm(
+    "アカウントを削除します。すべてのメモ・メディアが完全に削除され、元に戻せません。本当に削除しますか？",
+    "削除する"
+  );
+  if (!ok) return;
+  try {
+    await api("/api/account", { method: "DELETE" });
+    await auth.signOut();
+    showToast("アカウントを削除しました。");
+  } catch (e) { showToast(e.message); }
+}
+
+async function handleDeleteUnverifiedAccount() {
+  const ok = await showConfirm(
+    "アカウントを削除します。元に戻せません。本当に削除しますか？",
+    "削除する"
+  );
+  if (!ok) return;
+  try {
+    const user = auth.currentUser;
+    if (!user) return;
+    await user.delete();
+    showToast("アカウントを削除しました。");
+  } catch (e) { showToast(translateAuthError(e)); }
+}
+
+if (auth) {
+  els.authTabs.forEach(tab => {
+    tab.addEventListener("click", () => setAuthMode(tab.dataset.authTab));
+  });
+  els.authShowPassword.addEventListener("change", updatePasswordVisibility);
+  els.authForgotLink.addEventListener("click", () => setAuthMode("forgot"));
+  els.authBackToLoginLink.addEventListener("click", () => setAuthMode("login"));
+
+  els.authForm.addEventListener("submit", async e => {
+    e.preventDefault();
+    els.authError.hidden = true;
+    els.authInfo.hidden  = true;
+
+    const email    = els.authEmail.value.trim();
+    const password = els.authPassword.value;
+
+    els.authSubmitBtn.disabled = true;
+    authFlowInProgress = true;
+    try {
+      if (authMode === "forgot") {
+        await auth.sendPasswordResetEmail(email, emailActionSettings());
+        showAuthInfo(`再設定メールを送信しました。${EMAIL_DELIVERY_HELP}`);
+      } else {
+        await applyAuthPersistence();
+        if (authMode === "register") {
+          const cred = await auth.createUserWithEmailAndPassword(email, password);
+          await sendVerificationEmail(cred.user);
+          showVerificationScreen(cred.user, EMAIL_VERIFICATION_SENT);
+        } else {
+          const cred = await auth.signInWithEmailAndPassword(email, password);
+          await cred.user.reload();
+          if (!cred.user.emailVerified) {
+            const resent = await resendVerificationSilently(cred.user);
+            showVerificationScreen(
+              cred.user,
+              resent
+                ? `${EMAIL_VERIFICATION_REQUIRED} 確認メールを再送しました。`
+                : `${EMAIL_VERIFICATION_REQUIRED} 確認メールは送信済みです。時間を置いてからもう一度お試しください。`
+            );
+            return;
+          }
+          await cred.user.getIdToken(true);
+        }
+      }
+    } catch (err) {
+      if (auth.currentUser && !auth.currentUser.emailVerified) {
+        showVerificationScreen(auth.currentUser, translateAuthError(err));
+      } else {
+        showAuthError(translateAuthError(err));
+      }
+    } finally {
+      authFlowInProgress = false;
+      els.authSubmitBtn.disabled = false;
+    }
+  });
+
+  els.accountBtn.addEventListener("click", () => {
+    if (els.accountMenu.hidden) {
+      const rect = els.accountBtn.getBoundingClientRect();
+      els.accountMenu.style.top   = `${rect.bottom + 6}px`;
+      els.accountMenu.style.left  = "auto";
+      els.accountMenu.style.right = `${window.innerWidth - rect.right}px`;
+      els.accountMenu.hidden = false;
+    } else {
+      els.accountMenu.hidden = true;
+    }
+  });
+  els.resendVerificationBtn.addEventListener("click", handleResendVerification);
+  els.refreshStatusBtn.addEventListener("click", handleRefreshStatus);
+  els.logoutBtn.addEventListener("click", handleLogout);
+  els.deleteAccountBtn.addEventListener("click", handleDeleteAccount);
+  els.authVerifyResendBtn.addEventListener("click", handleResendVerification);
+  els.authVerifyRefreshBtn.addEventListener("click", handleRefreshStatus);
+  els.authVerifyLogoutBtn.addEventListener("click", handleLogout);
+  els.authVerifyDeleteBtn.addEventListener("click", handleDeleteUnverifiedAccount);
+}
+
 // ── Boot ──────────────────────────────────────────────────────────────────────
 
-loadNotes().catch(e => showToast(e.message));
+if (!auth) {
+  showAuthScreen();
+} else {
+  auth.onAuthStateChanged(async user => {
+    if (user) {
+      try {
+        await user.reload();
+      } catch (e) {
+        showAuthScreen();
+        showAuthError(translateAuthError(e));
+        return;
+      }
+
+      if (!user.emailVerified) {
+        showVerificationScreen(user);
+        updateAccountUI(user);
+        return;
+      }
+
+      await user.getIdToken(true);
+      showApp();
+      updateAccountUI(user);
+      try { await loadNotes(); } catch (e) { showToast(e.message); }
+    } else {
+      showAuthScreen();
+    }
+  });
+}

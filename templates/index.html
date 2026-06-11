@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body>
-  <div class="app-shell">
+  <div class="app-shell" hidden>
     <aside class="sidebar">
       <div class="brand">
         <div>
@@ -17,6 +17,7 @@
         </div>
         <button id="newRootBtn" class="icon-btn" title="最上位メモを追加">＋</button>
         <button id="templatesBtn" class="icon-btn" title="テンプレート">🗂️</button>
+        <button id="accountBtn" class="icon-btn" title="アカウント">👤</button>
       </div>
 
       <label class="search-box">
@@ -65,6 +66,73 @@
   <input id="mediaInput" type="file" accept="image/*,video/*" multiple hidden>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <!-- アカウント認証 -->
+  <div id="authOverlay" class="auth-overlay">
+    <div id="authDialog" class="auth-dialog" role="dialog" aria-modal="true">
+      <p class="auth-eyebrow">Memo</p>
+      <h2 id="authTitle">ログイン</h2>
+
+      <div id="authNotConfigured" class="auth-not-configured" hidden>
+        <p>⚠️ Firebaseが設定されていないため、ログイン機能を利用できません。</p>
+        <p>管理者は <code>.env</code> にFirebaseの設定値を追加してください。</p>
+      </div>
+
+      <div id="authFormWrap">
+        <div class="auth-tabs">
+          <button type="button" class="auth-tab active" data-auth-tab="login">ログイン</button>
+          <button type="button" class="auth-tab" data-auth-tab="register">新規登録</button>
+        </div>
+        <p class="auth-note">新規登録後、確認メールが届きます。認証が完了するまでログインできません。メールが届かない場合は迷惑メールフォルダを確認してください。</p>
+
+        <form id="authForm">
+          <label class="auth-field">
+            <span>メールアドレス</span>
+            <input id="authEmail" type="email" required autocomplete="email" placeholder="you@example.com">
+          </label>
+          <label class="auth-field" id="authPasswordField">
+            <span>パスワード</span>
+            <input id="authPassword" type="password" required autocomplete="current-password" minlength="6" placeholder="6文字以上">
+          </label>
+          <label class="auth-remember" id="authShowPasswordField">
+            <input type="checkbox" id="authShowPassword">
+            <span>パスワードを表示する</span>
+          </label>
+          <label class="auth-remember" id="authRememberField">
+            <input type="checkbox" id="authRemember" checked>
+            <span>ログイン状態を保持</span>
+          </label>
+
+          <p id="authError" class="auth-error" role="alert" hidden></p>
+          <p id="authInfo" class="auth-info" hidden></p>
+
+          <button id="authSubmitBtn" type="submit" class="btn auth-submit">ログイン</button>
+        </form>
+
+        <button id="authForgotLink" type="button" class="auth-link">パスワードを忘れた方はこちら</button>
+        <button id="authBackToLoginLink" type="button" class="auth-link" hidden>← ログインに戻る</button>
+      </div>
+
+      <div id="authVerifyPanel" class="auth-verify" hidden>
+        <div class="auth-verify-avatar" aria-hidden="true">👤</div>
+        <p class="auth-verify-name">メール認証待ち</p>
+        <p id="authVerifyEmail" class="auth-verify-email"></p>
+
+        <div class="auth-verify-alert">
+          <p>⚠️ メールアドレスの確認が必要です。送信したメール内のリンクを開いて認証を完了してください。</p>
+          <p>メールが届かない場合は迷惑メールフォルダを確認してください。</p>
+          <button id="authVerifyResendBtn" type="button" class="auth-verify-resend">確認メールを再送する</button>
+        </div>
+
+        <p class="auth-verify-help">メールのリンクを開いたあと、下のボタンで認証状況を更新してください。</p>
+        <p id="authVerifyStatus" class="auth-info" hidden></p>
+
+        <button id="authVerifyRefreshBtn" type="button" class="btn auth-verify-refresh">🔄 認証状況を更新</button>
+        <button id="authVerifyLogoutBtn" type="button" class="btn danger auth-verify-logout">ログアウト</button>
+        <button id="authVerifyDeleteBtn" type="button" class="auth-verify-delete">アカウントを削除（テスト用）</button>
+      </div>
+    </div>
+  </div>
 
   <!-- カスタム確認モーダル -->
   <div id="confirmOverlay" class="confirm-overlay">
@@ -149,6 +217,26 @@
     <button class="ctx-item ctx-danger" data-action="delete">🗑　削除</button>
   </div>
 
+  <!-- アカウントメニュー -->
+  <div id="accountMenu" class="context-menu account-menu" hidden>
+    <div class="account-menu-email" id="accountMenuEmail"></div>
+    <div class="account-menu-status" id="accountMenuStatus"></div>
+    <div class="ctx-sep"></div>
+    <button class="ctx-item" id="resendVerificationBtn">📧　確認メールを再送する</button>
+    <button class="ctx-item" id="refreshStatusBtn">🔄　認証状況を更新</button>
+    <div class="ctx-sep"></div>
+    <button class="ctx-item" id="logoutBtn">🚪　ログアウト</button>
+    <div class="ctx-sep"></div>
+    <button class="ctx-item ctx-danger" id="deleteAccountBtn">🗑　アカウントを削除</button>
+  </div>
+
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script>
+    const firebaseConfig = {{ firebase_config | tojson }};
+    window.FIREBASE_READY = !!(firebaseConfig.apiKey);
+    if (window.FIREBASE_READY) firebase.initializeApp(firebaseConfig);
+  </script>
   <script src="{{ url_for('static', filename='js/script.js') }}"></script>
 </body>
 </html>

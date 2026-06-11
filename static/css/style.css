@@ -1132,3 +1132,322 @@ h1 {
 }
 
 /* ── /テンプレートパネル ─────────────────────────────────── */
+
+/* ── アカウント認証 ───────────────────────────────────────── */
+
+.auth-overlay {
+  display: flex;
+  position: fixed;
+  inset: 0;
+  z-index: 12000;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 23, 42, 0.32);
+}
+
+.auth-dialog {
+  background: var(--panel);
+  border-radius: 24px;
+  padding: 32px 28px 28px;
+  width: min(380px, calc(100vw - 40px));
+  box-shadow:
+    0 4px 6px rgba(15, 23, 42, 0.04),
+    0 24px 64px rgba(15, 23, 42, 0.16);
+  animation: dialogIn 0.2s cubic-bezier(0.34, 1.4, 0.64, 1) both;
+}
+
+.auth-dialog.is-verifying {
+  width: min(560px, calc(100vw - 32px));
+}
+
+.auth-eyebrow {
+  margin: 0 0 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+#authTitle {
+  margin: 0 0 20px;
+  font-size: 24px;
+  letter-spacing: -0.02em;
+}
+
+.auth-tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 20px;
+  padding: 4px;
+  background: var(--panel-soft);
+  border-radius: 14px;
+}
+
+.auth-tab {
+  flex: 1;
+  padding: 9px 0;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 700;
+  transition: background 0.15s, color 0.15s;
+}
+
+.auth-tab.active {
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08);
+}
+
+.auth-note {
+  margin: -8px 0 18px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.6;
+}
+
+#authForm {
+  display: grid;
+  gap: 14px;
+}
+
+.auth-field {
+  display: grid;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.auth-field input {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 12px 14px;
+  background: var(--panel-soft);
+  outline: none;
+  font-size: 15px;
+  color: var(--text);
+}
+
+.auth-field input:focus {
+  border-color: var(--primary);
+  background: #fff;
+}
+
+.auth-remember {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.auth-remember input {
+  width: 16px;
+  height: 16px;
+}
+
+.auth-submit {
+  width: 100%;
+  text-align: center;
+  padding: 13px 0;
+  font-size: 15px;
+}
+
+.auth-error {
+  margin: 0;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: #fee2e2;
+  color: var(--danger);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.auth-info {
+  margin: 0;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.auth-link {
+  display: block;
+  margin: 14px auto 0;
+  border: 0;
+  background: transparent;
+  color: var(--primary);
+  font-size: 13px;
+  font-weight: 700;
+  text-align: center;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.auth-not-configured {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+  border-radius: 14px;
+  background: #fef3c7;
+  color: #92400e;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.auth-not-configured p {
+  margin: 0;
+}
+
+.auth-not-configured code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.08);
+  font-size: 12px;
+}
+
+.auth-verify {
+  display: grid;
+  gap: 18px;
+  text-align: center;
+}
+
+.auth-verify-avatar {
+  width: 86px;
+  height: 86px;
+  display: grid;
+  place-items: center;
+  margin: 4px auto 0;
+  border-radius: 50%;
+  background: #1f4979;
+  color: #dbeafe;
+  font-size: 40px;
+  line-height: 1;
+}
+
+.auth-verify-name {
+  margin: 0;
+  color: #1f3b66;
+  font-size: 22px;
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+.auth-verify-email {
+  margin: -14px 0 0;
+  color: var(--muted);
+  font-size: 15px;
+  word-break: break-all;
+}
+
+.auth-verify-alert {
+  display: grid;
+  gap: 14px;
+  border: 1.5px solid #facc15;
+  border-radius: 14px;
+  padding: 18px;
+  background: #fef3c7;
+  color: #7c5700;
+  text-align: left;
+}
+
+.auth-verify-alert p {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.7;
+}
+
+.auth-verify-resend,
+.auth-verify-refresh,
+.auth-verify-logout {
+  width: 100%;
+  border-radius: 999px;
+  padding: 15px 18px;
+  font-size: 16px;
+  font-weight: 800;
+  text-align: center;
+}
+
+.auth-verify-resend {
+  border: 0;
+  background: #eab308;
+  color: #fff;
+}
+
+.auth-verify-help {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.7;
+}
+
+.auth-verify-refresh {
+  background: #1f3b66;
+  color: #fff;
+}
+
+.auth-verify-logout {
+  background: #ef4444;
+}
+
+.auth-verify-delete {
+  width: fit-content;
+  margin: 2px auto 0;
+  border: 0;
+  background: transparent;
+  color: var(--danger);
+  font-size: 14px;
+  font-weight: 800;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+@media (max-width: 520px) {
+  .auth-dialog.is-verifying {
+    padding: 26px 20px 24px;
+  }
+
+  .auth-verify-resend,
+  .auth-verify-refresh,
+  .auth-verify-logout {
+    font-size: 15px;
+  }
+}
+
+/* ── /アカウント認証 ──────────────────────────────────────── */
+
+/* ── アカウントメニュー ───────────────────────────────────── */
+
+.account-menu {
+  min-width: 240px;
+}
+
+.account-menu-email {
+  padding: 10px 16px 2px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 700;
+  word-break: break-all;
+}
+
+.account-menu-status {
+  padding: 2px 16px 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* ── /アカウントメニュー ──────────────────────────────────── */
