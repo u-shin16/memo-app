@@ -192,7 +192,7 @@ async function renumberSiblings(parentId) {
   siblings.forEach((n, i) => {
     const order = (i + 1) * 1000;
     n.order = order;
-    batch.update(ref.doc(n.id), { order });
+    batch.set(ref.doc(n.id), { order }, { merge: true });
   });
   await batch.commit();
 }
@@ -1083,7 +1083,7 @@ async function updateNote(id, payload, reload = true) {
 
   updates.updated_at = nowIso();
 
-  await notesCollection().doc(id).update(updates);
+  await notesCollection().doc(id).set(updates, { merge: true });
   Object.assign(note, updates);
 
   if (reload) {
@@ -1119,7 +1119,7 @@ async function reorderNote(noteId, beforeId, parentId) {
   };
   if (parentId !== null) updates.pinned = false;
 
-  await notesCollection().doc(noteId).update(updates);
+  await notesCollection().doc(noteId).set(updates, { merge: true });
   Object.assign(note, updates);
   return note;
 }
@@ -1361,7 +1361,7 @@ function startTemplateRename(item, templateId) {
     input.replaceWith(nameEl);
     if (val !== orig) {
       try {
-        await templatesCollection().doc(templateId).update({ name: val, updated_at: nowIso() });
+        await templatesCollection().doc(templateId).set({ name: val, updated_at: nowIso() }, { merge: true });
         const t = state.templates.find(t => t.id === templateId);
         if (t) t.name = val;
         showToast("名前を変更しました。");
@@ -1458,7 +1458,7 @@ async function uploadMedia(noteId, files) {
         downloadURL,
       };
       const updates = { media: [...(note.media ?? []), item], updated_at: nowIso() };
-      await notesCollection().doc(noteId).update(updates);
+      await notesCollection().doc(noteId).set(updates, { merge: true });
       Object.assign(note, updates);
       insertMediaElement(item);
     } catch (e) { showToast(`${file.name}: ${e.message}`); }
@@ -2829,29 +2829,61 @@ async function handleLogout() {
   } catch (e) { showToast(translateAuthError(e)); }
 }
 
-async function handleDeleteAccount() {
+async function handleDeleteAccount(e) {
+  e?.preventDefault();
+  console.log("[deleteAccount] clicked");
   els.accountMenu.hidden = true;
+
   const ok = await showConfirm(
     "アカウントを削除します。すべてのメモ・メディアが完全に削除され、元に戻せません。本当に削除しますか？",
     "削除する"
   );
-  if (!ok) return;
+  if (!ok) {
+    console.log("[deleteAccount] cancelled by user");
+    return;
+  }
+
   const user = auth.currentUser;
-  if (!user) return;
-  const userRef = db.collection("users").doc(user.uid);
+  if (!user) {
+    console.error("[deleteAccount] auth.currentUser is null");
+    showToast("ログイン情報が確認できません。再度ログインしてください。");
+    return;
+  }
+
+  els.deleteAccountBtn.disabled = true;
+  console.log("[deleteAccount] starting deletion for uid:", user.uid);
+
   try {
+    const userRef = db.collection("users").doc(user.uid);
+
+    console.log("[deleteAccount] deleting users/{uid}/notes ...");
     await deleteCollectionInBatches(userRef.collection("notes"));
+
+    console.log("[deleteAccount] deleting users/{uid}/templates ...");
     await deleteCollectionInBatches(userRef.collection("templates"));
-    await userRef.delete().catch(() => {});
-    await deleteStoragePrefix(`users/${user.uid}/media`);
+
+    console.log("[deleteAccount] deleting users/{uid} document ...");
+    await userRef.delete().catch(err => console.warn("[deleteAccount] users/{uid} doc delete skipped:", err));
+
+    console.log("[deleteAccount] deleting Storage media ...");
+    await deleteStoragePrefix(`users/${user.uid}/media`).catch(err => console.warn("[deleteAccount] media delete skipped:", err));
+
+    console.log("[deleteAccount] deleting Firebase Auth user ...");
     await user.delete();
+
+    console.log("[deleteAccount] success");
     showToast("アカウントを削除しました。");
-  } catch (e) {
-    if (e && e.code === "auth/requires-recent-login") {
-      showToast("セキュリティのため、一度ログアウトして再度ログインしてから削除してください。");
+    state.uid = null;
+    showAuthScreen();
+  } catch (err) {
+    console.error("[deleteAccount] failed:", err);
+    if (err && err.code === "auth/requires-recent-login") {
+      showToast("安全のため、もう一度ログインしてからアカウント削除を実行してください。");
     } else {
-      showToast(e.message);
+      showToast(translateAuthError(err));
     }
+  } finally {
+    els.deleteAccountBtn.disabled = false;
   }
 }
 
