@@ -10,6 +10,7 @@ const state = {
   saveTimer:       null,
   contextNoteId:   null,
   isDraggingNote:  false,
+  suppressTreeClickUntil: 0,
   mediaCmFigure:   null,
   pendingMediaCaretFigure: null,
   undoStack:       [],
@@ -24,6 +25,9 @@ let _isComposing = false;
 // ── DOM refs ──────────────────────────────────────────────────────────────────
 
 const els = {
+  sidebar:          document.getElementById("sidebar"),
+  mobileMenuBtn:   document.getElementById("mobileMenuBtn"),
+  mobileMenuBackdrop: document.getElementById("mobileMenuBackdrop"),
   tree:             document.getElementById("tree"),
   noteCount:        document.getElementById("noteCount"),
   titleInput:       document.getElementById("titleInput"),
@@ -127,6 +131,55 @@ function showToast(message) {
   els.toast.textContent = message;
   els.toast.classList.add("show");
   setTimeout(() => els.toast.classList.remove("show"), 2600);
+}
+
+const mobileMenuMql = window.matchMedia("(max-width: 860px)");
+
+function isMobileMenuLayout() {
+  return mobileMenuMql.matches;
+}
+
+function setMobileMenuOpen(open) {
+  const shouldOpen = Boolean(open) && isMobileMenuLayout();
+  els.appShell.classList.toggle("mobile-menu-open", shouldOpen);
+  els.mobileMenuBackdrop.hidden = !shouldOpen;
+  document.body.classList.toggle("has-mobile-menu-open", shouldOpen);
+  els.mobileMenuBtn.setAttribute("aria-expanded", String(shouldOpen));
+  els.mobileMenuBtn.setAttribute(
+    "aria-label",
+    shouldOpen ? "メモ一覧を閉じる" : "メモ一覧を開く"
+  );
+  els.mobileMenuBtn.title = shouldOpen ? "メモ一覧を閉じる" : "メモ一覧を開く";
+
+  const icon = els.mobileMenuBtn.querySelector(".mobile-menu-icon");
+  if (icon) icon.textContent = shouldOpen ? "×" : "☰";
+}
+
+function toggleMobileMenu() {
+  setMobileMenuOpen(!els.appShell.classList.contains("mobile-menu-open"));
+}
+
+function closeMobileMenu() {
+  setMobileMenuOpen(false);
+}
+
+function suppressTreeClickAfterDrag() {
+  state.suppressTreeClickUntil = Date.now() + 700;
+}
+
+function shouldSuppressTreeClick() {
+  return Date.now() < state.suppressTreeClickUntil;
+}
+
+function isTreeToggleClick(e, row, toggle, hasKids) {
+  if (!hasKids) return false;
+  if (e.target === toggle || toggle.contains(e.target)) return true;
+  if (!isMobileMenuLayout()) return false;
+
+  const rowRect = row.getBoundingClientRect();
+  const toggleRect = toggle.getBoundingClientRect();
+  const hitRight = Math.max(toggleRect.right, rowRect.left + 56);
+  return e.clientX >= rowRect.left && e.clientX <= hitRight;
 }
 
 function setButtonContent(button, icon, label = "") {
@@ -538,11 +591,17 @@ async function moveNoteToTreePosition(noteId, parentId, beforeId, options = {}) 
 
   const moving = getNotes().find(n => n.id === noteId);
   const parentChanged = moving?.parent_id !== target.parentId;
+  const wasSelected = state.selectedId === noteId;
 
   try {
     await reorderNote(noteId, target.beforeId, target.parentId);
     if (target.parentId) state.expanded.add(target.parentId);
-    selectNote(noteId);
+    if (isMobileMenuLayout()) {
+      renderTree();
+      if (wasSelected) renderEditor();
+    } else {
+      selectNote(noteId);
+    }
     showToast(target.stayedWithParent ? "同じ親メモ内で並び替えました。" :
               parentChanged ? "メモを移動しました。" : "並び替えました。");
   } catch (e) { showToast(e.message); }
@@ -572,6 +631,7 @@ function createTreeInsertZone(parentId, beforeId) {
   zone.addEventListener("drop", async e => {
     e.preventDefault();
     e.stopPropagation();
+    suppressTreeClickAfterDrag();
     const id = e.dataTransfer.getData("text/plain");
     clearTreeDropHighlights();
     await moveNoteToTreePosition(id, parentId, beforeId);
@@ -900,8 +960,13 @@ function renderNode(note, treeCtx) {
   row.appendChild(addBtn);
 
   row.addEventListener("click", e => {
+    if (shouldSuppressTreeClick()) {
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
     if (addBtn.contains(e.target)) { e.stopPropagation(); createNote(note.id); return; }
-    if (e.target === toggle && hasKids) {
+    if (isTreeToggleClick(e, row, toggle, hasKids)) {
       e.stopPropagation();
       state.expanded.has(note.id) ? state.expanded.delete(note.id) : state.expanded.add(note.id);
       renderTree(); return;
@@ -922,6 +987,7 @@ function renderNode(note, treeCtx) {
   row.addEventListener("dragend", () => {
     document.body.classList.remove("is-dragging");
     state.isDraggingNote = false;
+    suppressTreeClickAfterDrag();
     row.classList.remove("drag-target", "drag-before");
     stopTreeAutoScroll();
   });
@@ -938,6 +1004,7 @@ function renderNode(note, treeCtx) {
   });
   row.addEventListener("drop", async e => {
     e.preventDefault();
+    suppressTreeClickAfterDrag();
     const isBefore = row.classList.contains("drag-before");
     row.classList.remove("drag-target", "drag-before");
     const id = e.dataTransfer.getData("text/plain");
@@ -1031,6 +1098,7 @@ function selectNote(id) {
   state.selectedId = id;
   renderTree();
   renderEditor();
+  closeMobileMenu();
 }
 
 async function saveCurrentEditorNow() {
@@ -1438,6 +1506,7 @@ function appendTemplateItem(template) {
 }
 
 function openTemplatesPanel() {
+  closeMobileMenu();
   els.templatesOverlay.hidden = false;
   state.templatePreviewId = null;
   els.templateNameInput.value = "";
@@ -2658,6 +2727,7 @@ document.addEventListener("keydown", e => {
     hideCtxMenu();
     hideMediaCtxMenu();
     els.accountMenu.hidden = true;
+    closeMobileMenu();
     resolveConfirm(false);
   }
   const isUndo = (e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "z";
@@ -2675,6 +2745,7 @@ document.addEventListener("keydown", e => {
 });
 
 document.addEventListener("dragend", () => {
+  if (state.isDraggingNote) suppressTreeClickAfterDrag();
   document.body.classList.remove("is-dragging");
   state.isDraggingNote = false;
   clearTreeDropHighlights();
@@ -2684,6 +2755,21 @@ document.addEventListener("dragend", () => {
 document.addEventListener("selectionchange", updateActiveMediaCaretFromSelection);
 
 // ── ボタン / 入力バインド ─────────────────────────────────────────────────────
+
+els.mobileMenuBtn.addEventListener("click", e => {
+  e.stopPropagation();
+  toggleMobileMenu();
+});
+els.mobileMenuBackdrop.addEventListener("click", closeMobileMenu);
+if (mobileMenuMql.addEventListener) {
+  mobileMenuMql.addEventListener("change", e => {
+    if (!e.matches) closeMobileMenu();
+  });
+} else {
+  mobileMenuMql.addListener(e => {
+    if (!e.matches) closeMobileMenu();
+  });
+}
 
 els.titleInput.addEventListener("input", scheduleSave);
 els.checkBtn.addEventListener("click", () => {

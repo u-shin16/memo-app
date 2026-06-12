@@ -5,11 +5,32 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>StackNote｜階層メモ帳アプリ</title>
   <meta name="description" content="アイデアを階層的に整理できるシンプルなメモ帳アプリです。画像・動画の添付にも対応。">
+  <meta name="theme-color" content="#2563eb">
+  <meta name="application-name" content="StackNote">
+  <meta name="apple-mobile-web-app-title" content="StackNote">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('static', filename='icons/favicon-32.png') }}">
+  <link rel="icon" type="image/png" sizes="16x16" href="{{ url_for('static', filename='icons/favicon-16.png') }}">
+  <link rel="apple-touch-icon" sizes="180x180" href="{{ url_for('static', filename='icons/apple-touch-icon.png') }}">
+  <link rel="manifest" href="{{ url_for('static', filename='site.webmanifest') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body>
   <div class="app-shell" hidden>
-    <aside class="sidebar">
+    <button id="mobileMenuBtn"
+            class="mobile-menu-btn"
+            type="button"
+            title="メモ一覧を開く"
+            aria-label="メモ一覧を開く"
+            aria-controls="sidebar"
+            aria-expanded="false">
+      <span class="btn-icon mobile-menu-icon" aria-hidden="true">☰</span>
+      <span class="mobile-menu-text">メモ</span>
+    </button>
+    <div id="mobileMenuBackdrop" class="mobile-menu-backdrop" hidden></div>
+
+    <aside id="sidebar" class="sidebar">
       <div class="brand">
         <div>
           <p class="eyebrow">Hierarchical Notes</p>
@@ -59,7 +80,7 @@
           </button>
           <button id="addChildBtn" class="btn" title="選択中のメモに子メモを追加">
             <span class="btn-icon" aria-hidden="true">＋</span>
-            <span class="btn-label">子メモ追加</span>
+            <span class="btn-label">メモ追加</span>
           </button>
           <button id="mediaBtn" class="btn ghost media-add-btn" title="画像・動画を添付（またはドラッグ＆ドロップ）">
             <span class="btn-icon" aria-hidden="true">📎</span>
@@ -246,11 +267,11 @@
   <!-- 右クリックコンテキストメニュー -->
   <div id="contextMenu" class="context-menu" hidden>
     <button class="ctx-item" data-action="rename">✏️　名前を変更</button>
-    <button class="ctx-item" data-action="add-child">＋　子メモを追加</button>
+    <button class="ctx-item" data-action="add-child">＋　メモを追加</button>
     <button class="ctx-item" data-action="toggle-check">✓　チェックする</button>
     <button class="ctx-item" data-action="toggle-pin">📌　ピン留め</button>
-    <button class="ctx-item" data-action="move-sibling-top">↑　同じ階層の最上位へ移動</button>
-    <button class="ctx-item" data-action="move-sibling-bottom">↓　同じ階層の最下位へ移動</button>
+    <button class="ctx-item" data-action="move-sibling-top">↑　最上位へ移動</button>
+    <button class="ctx-item" data-action="move-sibling-bottom">↓　最下位へ移動</button>
     <div class="ctx-sep"></div>
     <button class="ctx-item ctx-danger" data-action="delete">🗑　削除</button>
   </div>

@@ -43,6 +43,11 @@ button {
   height: 100vh;
 }
 
+.mobile-menu-btn,
+.mobile-menu-backdrop {
+  display: none;
+}
+
 .sidebar {
   display: flex;
   flex-direction: column;
@@ -895,15 +900,80 @@ h1 {
     height: auto;
     min-height: 100vh;
     min-height: 100dvh;
+    padding-top: calc(62px + env(safe-area-inset-top));
+  }
+
+  body.has-mobile-menu-open {
+    overflow: hidden;
+  }
+
+  .mobile-menu-btn {
+    position: fixed;
+    top: calc(10px + env(safe-area-inset-top));
+    left: 12px;
+    z-index: 11200;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    min-width: 88px;
+    min-height: 44px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 0 12px;
+    background: rgba(255, 255, 255, 0.96);
+    color: var(--text);
+    box-shadow: 0 12px 28px rgba(15, 23, 42, 0.16);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    font-weight: 800;
+  }
+
+  .mobile-menu-icon {
+    width: 18px;
+    font-size: 20px;
+  }
+
+  .mobile-menu-text {
+    font-size: 13px;
+    line-height: 1;
+  }
+
+  .app-shell.mobile-menu-open .mobile-menu-btn {
+    background: var(--primary);
+    border-color: var(--primary);
+    color: #fff;
+  }
+
+  .mobile-menu-backdrop:not([hidden]) {
+    position: fixed;
+    inset: 0;
+    z-index: 11000;
+    display: block;
+    background: rgba(15, 23, 42, 0.38);
+    animation: overlayIn 0.16s ease both;
   }
 
   .sidebar {
-    height: clamp(300px, 42dvh, 390px);
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 11100;
+    width: min(86vw, 360px);
+    height: 100vh;
+    height: 100dvh;
     min-height: 0;
     gap: 12px;
-    padding: 16px;
-    border-right: 0;
-    border-bottom: 1px solid var(--line);
+    padding: calc(70px + env(safe-area-inset-top)) 16px 18px;
+    border-bottom: 0;
+    border-right: 1px solid var(--line);
+    box-shadow: 20px 0 42px rgba(15, 23, 42, 0.18);
+    transform: translateX(-105%);
+    transition: transform 0.22s ease;
+    will-change: transform;
+  }
+
+  .app-shell.mobile-menu-open .sidebar {
+    transform: translateX(0);
   }
 
   .brand {
@@ -946,8 +1016,21 @@ h1 {
   }
 
   .tree-row {
+    grid-template-columns: 50px minmax(0, 1fr) auto auto;
     min-height: 42px;
-    padding: 8px 6px;
+    padding: 5px 6px 5px 0;
+  }
+
+  .toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 50px;
+    min-height: 44px;
+    margin: -5px 0;
+    border-radius: 12px;
+    font-size: 17px;
+    touch-action: manipulation;
   }
 
   .tree-add {
@@ -961,7 +1044,7 @@ h1 {
   }
 
   .editor {
-    min-height: calc(100dvh - 390px);
+    min-height: calc(100dvh - 62px - env(safe-area-inset-top));
     padding: 18px 16px 20px;
   }
 
@@ -1028,6 +1111,7 @@ h1 {
   }
 
   .context-menu {
+    z-index: 11300;
     max-width: calc(100vw - 16px);
   }
 
