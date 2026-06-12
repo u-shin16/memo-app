@@ -129,9 +129,10 @@ function showToast(message) {
   setTimeout(() => els.toast.classList.remove("show"), 2600);
 }
 
-function setButtonContent(button, icon, label) {
+function setButtonContent(button, icon, label = "") {
   if (!button) return;
-  button.innerHTML = `<span class="btn-icon" aria-hidden="true">${icon}</span><span class="btn-label">${label}</span>`;
+  button.innerHTML = `<span class="btn-icon" aria-hidden="true">${icon}</span>` +
+                     (label ? `<span class="btn-label">${label}</span>` : "");
 }
 
 // ── Confirm modal ─────────────────────────────────────────────────────────────
@@ -895,7 +896,7 @@ function renderNode(note, treeCtx) {
   const addBtn = document.createElement("span");
   addBtn.className   = "tree-add";
   addBtn.title       = "このメモに子メモを追加";
-  setButtonContent(addBtn, "＋", "子追加");
+  setButtonContent(addBtn, "＋");
   row.appendChild(addBtn);
 
   row.addEventListener("click", e => {
@@ -985,7 +986,7 @@ function renderEditor() {
     els.checkBtn.disabled = true;
     els.checkBtn.classList.remove("active");
     els.checkBtn.title = "チェックを付ける";
-    setButtonContent(els.checkBtn, "✓", "チェックする");
+    setButtonContent(els.checkBtn, "✓");
     updateEmptyState();
     updateUndoButton();
     return;
@@ -993,7 +994,7 @@ function renderEditor() {
   els.checkBtn.disabled = false;
   els.checkBtn.classList.toggle("active", Boolean(note.checked));
   els.checkBtn.title = note.checked ? "チェックを外す" : "チェックを付ける";
-  setButtonContent(els.checkBtn, "✓", note.checked ? "チェック済み" : "チェックする");
+  setButtonContent(els.checkBtn, "✓");
   els.contentInput.dataset.placeholder = "ここにメモを書いてください";
   els.contentInput.contentEditable = "true";
   els.titleInput.placeholder = "タイトル";
@@ -1311,7 +1312,7 @@ function renderTemplateItem(t) {
   previewBtn.title       = previewActive ? "プレビューを閉じる" : "テンプレートの内容を見る";
   previewBtn.setAttribute("aria-label", previewActive ? "プレビューを閉じる" : "テンプレートの内容を見る");
   previewBtn.dataset.action = "preview";
-  setButtonContent(previewBtn, "🔍", previewActive ? "閉じる" : "内容を見る");
+  setButtonContent(previewBtn, previewActive ? "×" : "🔍", previewActive ? "" : "内容を見る");
 
   const applyBtn = document.createElement("button");
   applyBtn.className   = "template-action-btn";

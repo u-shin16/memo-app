@@ -56,7 +56,6 @@
           </button>
           <button id="checkBtn" class="btn ghost check-toggle-btn" title="チェックを付ける">
             <span class="btn-icon" aria-hidden="true">✓</span>
-            <span class="btn-label">チェックする</span>
           </button>
           <button id="addChildBtn" class="btn" title="選択中のメモに子メモを追加">
             <span class="btn-icon" aria-hidden="true">＋</span>
@@ -94,7 +93,7 @@
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
   <!-- アカウント認証 -->
-  <div id="authOverlay" class="auth-overlay">
+  <div id="authOverlay" class="auth-overlay" hidden>
     <div id="authDialog" class="auth-dialog" role="dialog" aria-modal="true">
       <p class="auth-eyebrow">StackNote</p>
       <h2 id="authTitle">ログイン</h2>
@@ -161,7 +160,7 @@
           <span class="btn-icon" aria-hidden="true">⇥</span>
           <span class="btn-label">ログアウト</span>
         </button>
-        <button id="authVerifyDeleteBtn" type="button" class="auth-verify-delete">アカウントを削除（テスト用）</button>
+        <button id="authVerifyDeleteBtn" type="button" class="auth-verify-delete">アカウントを削除</button>
       </div>
     </div>
   </div>
@@ -197,7 +196,6 @@
   <div id="lightboxOverlay" class="lightbox-overlay" hidden>
     <button id="lightboxClose" class="lightbox-close" title="閉じる" aria-label="画像プレビューを閉じる">
       <span class="btn-icon" aria-hidden="true">×</span>
-      <span class="btn-label">閉じる</span>
     </button>
     <img id="lightboxImg" class="lightbox-img" src="" alt="">
   </div>
@@ -224,7 +222,6 @@
         <p class="templates-title">テンプレート</p>
         <button id="templatesClose" class="templates-close" title="閉じる" aria-label="テンプレートを閉じる">
           <span class="btn-icon" aria-hidden="true">×</span>
-          <span class="btn-label">閉じる</span>
         </button>
       </div>
       <p class="templates-hint">選択中のメモとその子メモを保存できます。追加すると新しい親メモとしてメモ一覧に入ります。</p>
