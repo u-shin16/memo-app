@@ -234,6 +234,7 @@ def main() -> None:
         note.setdefault("source_file", None)
         note.setdefault("pinned", False)
         note.setdefault("checked", False)
+        note.setdefault("checked_at", None)
 
     for template in templates:
         tree = template.get("tree")

@@ -15,9 +15,20 @@
           <p class="eyebrow">Hierarchical Notes</p>
           <h1>StackNote</h1>
         </div>
-        <button id="newRootBtn" class="icon-btn" title="最上位メモを追加">＋</button>
-        <button id="templatesBtn" class="icon-btn" title="テンプレート">🗂️</button>
-        <button id="accountBtn" class="icon-btn" title="アカウント">👤</button>
+        <div class="brand-actions">
+          <button id="newRootBtn" class="icon-btn" title="最上位メモを追加" aria-label="最上位メモを追加">
+            <span class="btn-icon" aria-hidden="true">＋</span>
+            <span class="btn-label">新規メモ</span>
+          </button>
+          <button id="templatesBtn" class="icon-btn" title="テンプレートを開く" aria-label="テンプレートを開く">
+            <span class="btn-icon" aria-hidden="true">▣</span>
+            <span class="btn-label">テンプレート</span>
+          </button>
+          <button id="accountBtn" class="icon-btn" title="アカウントメニューを開く" aria-label="アカウントメニューを開く">
+            <span class="btn-icon" aria-hidden="true">👤</span>
+            <span class="btn-label">アカウント</span>
+          </button>
+        </div>
       </div>
 
       <label class="search-box">
@@ -39,11 +50,26 @@
           <input id="titleInput" class="title-input" placeholder="メモを選択するか作成してください">
         </div>
         <div class="actions">
-          <button id="undoBtn" class="btn ghost undo-btn" title="一つ前に戻る（Ctrl / ⌘ + Z）" disabled>↶ 戻る</button>
-          <button id="checkBtn" class="btn ghost check-toggle-btn" title="チェックを付ける">✅</button>
-          <button id="addChildBtn" class="btn">メモを追加</button>
-          <button id="mediaBtn"    class="btn ghost media-add-btn" title="画像・動画を添付（またはドラッグ＆ドロップ）">＋ 📎</button>
-          <button id="deleteBtn"   class="btn danger">削除</button>
+          <button id="undoBtn" class="btn ghost undo-btn" title="一つ前に戻る（Ctrl / ⌘ + Z）" disabled>
+            <span class="btn-icon" aria-hidden="true">↶</span>
+            <span class="btn-label">戻す</span>
+          </button>
+          <button id="checkBtn" class="btn ghost check-toggle-btn" title="チェックを付ける">
+            <span class="btn-icon" aria-hidden="true">✓</span>
+            <span class="btn-label">チェックする</span>
+          </button>
+          <button id="addChildBtn" class="btn" title="選択中のメモに子メモを追加">
+            <span class="btn-icon" aria-hidden="true">＋</span>
+            <span class="btn-label">子メモ追加</span>
+          </button>
+          <button id="mediaBtn" class="btn ghost media-add-btn" title="画像・動画を添付（またはドラッグ＆ドロップ）">
+            <span class="btn-icon" aria-hidden="true">📎</span>
+            <span class="btn-label">画像/動画添付</span>
+          </button>
+          <button id="deleteBtn" class="btn danger" title="選択中のメモを削除">
+            <span class="btn-icon" aria-hidden="true">🗑</span>
+            <span class="btn-label">削除</span>
+          </button>
         </div>
       </section>
 
@@ -127,8 +153,14 @@
         <p class="auth-verify-help">メールのリンクを開いたあと、下のボタンで認証状況を更新してください。</p>
         <p id="authVerifyStatus" class="auth-info" hidden></p>
 
-        <button id="authVerifyRefreshBtn" type="button" class="btn auth-verify-refresh">🔄 認証状況を更新</button>
-        <button id="authVerifyLogoutBtn" type="button" class="btn danger auth-verify-logout">ログアウト</button>
+        <button id="authVerifyRefreshBtn" type="button" class="btn auth-verify-refresh">
+          <span class="btn-icon" aria-hidden="true">↻</span>
+          <span class="btn-label">認証状況を更新</span>
+        </button>
+        <button id="authVerifyLogoutBtn" type="button" class="btn danger auth-verify-logout">
+          <span class="btn-icon" aria-hidden="true">⇥</span>
+          <span class="btn-label">ログアウト</span>
+        </button>
         <button id="authVerifyDeleteBtn" type="button" class="auth-verify-delete">アカウントを削除（テスト用）</button>
       </div>
     </div>
@@ -152,8 +184,8 @@
       <button class="ctx-item" data-media-action="copy">📋 コピー</button>
       <div class="ctx-sep"></div>
       <div class="ctx-section-label">画像サイズ</div>
-      <button class="ctx-item" data-media-action="size" data-size="small">◻ 小 &nbsp;(120px)</button>
-      <button class="ctx-item" data-media-action="size" data-size="large">⬛ 大 &nbsp;(75%)</button>
+      <button class="ctx-item" data-media-action="size" data-size="small">↘ 小さく表示 &nbsp;(120px)</button>
+      <button class="ctx-item" data-media-action="size" data-size="large">↗ 大きく表示 &nbsp;(75%)</button>
       <div class="ctx-sep"></div>
       <button class="ctx-item" id="mediaTrimBtn" data-media-action="trim">✂️ トリミング</button>
       <div class="ctx-sep"></div>
@@ -163,7 +195,10 @@
 
   <!-- ライトボックス（画像クリック時） -->
   <div id="lightboxOverlay" class="lightbox-overlay" hidden>
-    <button id="lightboxClose" class="lightbox-close" title="閉じる">✕</button>
+    <button id="lightboxClose" class="lightbox-close" title="閉じる" aria-label="画像プレビューを閉じる">
+      <span class="btn-icon" aria-hidden="true">×</span>
+      <span class="btn-label">閉じる</span>
+    </button>
     <img id="lightboxImg" class="lightbox-img" src="" alt="">
   </div>
 
@@ -187,14 +222,20 @@
     <div class="templates-dialog">
       <div class="templates-head">
         <p class="templates-title">テンプレート</p>
-        <button id="templatesClose" class="templates-close" title="閉じる">✕</button>
+        <button id="templatesClose" class="templates-close" title="閉じる" aria-label="テンプレートを閉じる">
+          <span class="btn-icon" aria-hidden="true">×</span>
+          <span class="btn-label">閉じる</span>
+        </button>
       </div>
       <p class="templates-hint">選択中のメモとその子メモを保存できます。追加すると新しい親メモとしてメモ一覧に入ります。</p>
       <div class="templates-section">
         <p class="templates-section-title">選択中のメモを保存</p>
         <div class="templates-save-row">
           <input id="templateNameInput" type="text" placeholder="テンプレート名を入力">
-          <button id="templateSaveBtn" class="btn">保存</button>
+          <button id="templateSaveBtn" class="btn">
+            <span class="btn-icon" aria-hidden="true">＋</span>
+            <span class="btn-label">テンプレート保存</span>
+          </button>
         </div>
       </div>
       <div class="ctx-sep"></div>
@@ -208,20 +249,29 @@
   <!-- 右クリックコンテキストメニュー -->
   <div id="contextMenu" class="context-menu" hidden>
     <button class="ctx-item" data-action="rename">✏️　名前を変更</button>
-    <button class="ctx-item" data-action="add-child">＋　メモを追加</button>
-    <button class="ctx-item" data-action="toggle-check">✅　チェックを付ける</button>
+    <button class="ctx-item" data-action="add-child">＋　子メモを追加</button>
+    <button class="ctx-item" data-action="toggle-check">✓　チェックする</button>
     <button class="ctx-item" data-action="toggle-pin">📌　ピン留め</button>
-    <button class="ctx-item" data-action="move-sibling-top">↑　最上位へ移動</button>
-    <button class="ctx-item" data-action="move-sibling-bottom">↓　最下位へ移動</button>
+    <button class="ctx-item" data-action="move-sibling-top">↑　同じ階層の最上位へ移動</button>
+    <button class="ctx-item" data-action="move-sibling-bottom">↓　同じ階層の最下位へ移動</button>
     <div class="ctx-sep"></div>
     <button class="ctx-item ctx-danger" data-action="delete">🗑　削除</button>
   </div>
 
   <!-- アカウントメニュー -->
   <div id="accountMenu" class="context-menu account-menu" hidden>
+    <div class="account-menu-name" id="accountMenuName"></div>
     <div class="account-menu-email" id="accountMenuEmail"></div>
     <div class="account-menu-status" id="accountMenuStatus"></div>
+    <div class="account-menu-name-edit" id="displayNameEditRow" hidden>
+      <input type="text" id="displayNameInput" maxlength="50" placeholder="表示名を入力">
+      <div class="account-menu-name-actions">
+        <button class="btn ghost btn-sm" id="displayNameCancelBtn">キャンセル</button>
+        <button class="btn btn-sm" id="displayNameSaveBtn">保存</button>
+      </div>
+    </div>
     <div class="ctx-sep"></div>
+    <button class="ctx-item" id="editDisplayNameBtn">✏️　表示名を変更</button>
     <button class="ctx-item" id="resendVerificationBtn">📧　確認メールを再送する</button>
     <button class="ctx-item" id="refreshStatusBtn">🔄　認証状況を更新</button>
     <div class="ctx-sep"></div>

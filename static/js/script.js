@@ -4,6 +4,7 @@ const state = {
   uid:             null,
   data:            null,
   templates:       [],
+  templatePreviewId: null,
   selectedId:      null,
   expanded:        new Set(),
   saveTimer:       null,
@@ -91,8 +92,14 @@ const els = {
   // Account menu
   accountBtn:            document.getElementById("accountBtn"),
   accountMenu:           document.getElementById("accountMenu"),
+  accountMenuName:       document.getElementById("accountMenuName"),
   accountMenuEmail:      document.getElementById("accountMenuEmail"),
   accountMenuStatus:     document.getElementById("accountMenuStatus"),
+  editDisplayNameBtn:    document.getElementById("editDisplayNameBtn"),
+  displayNameEditRow:    document.getElementById("displayNameEditRow"),
+  displayNameInput:      document.getElementById("displayNameInput"),
+  displayNameSaveBtn:    document.getElementById("displayNameSaveBtn"),
+  displayNameCancelBtn:  document.getElementById("displayNameCancelBtn"),
   resendVerificationBtn: document.getElementById("resendVerificationBtn"),
   refreshStatusBtn:      document.getElementById("refreshStatusBtn"),
   logoutBtn:             document.getElementById("logoutBtn"),
@@ -120,6 +127,11 @@ function showToast(message) {
   els.toast.textContent = message;
   els.toast.classList.add("show");
   setTimeout(() => els.toast.classList.remove("show"), 2600);
+}
+
+function setButtonContent(button, icon, label) {
+  if (!button) return;
+  button.innerHTML = `<span class="btn-icon" aria-hidden="true">${icon}</span><span class="btn-label">${label}</span>`;
 }
 
 // ── Confirm modal ─────────────────────────────────────────────────────────────
@@ -159,6 +171,10 @@ function nowIso() {
   const pad = n => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` +
          `T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+function nowSortableIso() {
+  return new Date().toISOString();
 }
 
 function notesCollection() {
@@ -286,6 +302,7 @@ function createNotesFromTemplate(node, parentId, order) {
     media:       [],
     pinned:      false,
     checked:     false,
+    checked_at:  null,
     order,
   };
   const created = [note];
@@ -407,9 +424,34 @@ function countDescendants(noteId) {
   return children.reduce((sum, c) => sum + 1 + countDescendants(c.id), 0);
 }
 
+function checkedTimestampValue(note) {
+  const value = note.checked_at;
+  if (typeof value === "string") {
+    const timestamp = Date.parse(value);
+    return Number.isFinite(timestamp) ? timestamp : 0;
+  }
+  if (typeof value === "number") return value;
+  if (value && typeof value.toMillis === "function") return value.toMillis();
+  if (value && typeof value.seconds === "number") {
+    return value.seconds * 1000 + Math.floor((value.nanoseconds ?? 0) / 1e6);
+  }
+  return 0;
+}
+
 function orderTreeChildren(parentId, children) {
-  if (parentId !== null) return children;
-  return [...children].sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)));
+  return [...children].sort((a, b) => {
+    if (parentId === null) {
+      const pinDiff = Number(Boolean(b.pinned)) - Number(Boolean(a.pinned));
+      if (pinDiff !== 0) return pinDiff;
+    }
+    const checkDiff = Number(Boolean(b.checked)) - Number(Boolean(a.checked));
+    if (checkDiff !== 0) return checkDiff;
+    if (a.checked && b.checked) {
+      const checkedAtDiff = checkedTimestampValue(b) - checkedTimestampValue(a);
+      if (checkedAtDiff !== 0) return checkedAtDiff;
+    }
+    return (a.order ?? 0) - (b.order ?? 0);
+  });
 }
 
 function createTreeRenderContext(q) {
@@ -480,24 +522,12 @@ function firstSiblingId(noteId, parentId) {
 }
 
 function normalizeTreeDropTarget(noteId, parentId, beforeId, options = {}) {
-  const moving = getNotes().find(n => n.id === noteId);
   const normalizedParentId = parentId ?? null;
-  if (!moving) {
-    return { parentId: normalizedParentId, beforeId: beforeId ?? null, stayedWithParent: false };
-  }
-
-  if (moving.parent_id !== null && normalizedParentId === null) {
-    const siblingBeforeId = (beforeId || options.preferSiblingStart)
-      ? firstSiblingId(noteId, moving.parent_id)
-      : null;
-    return { parentId: moving.parent_id, beforeId: siblingBeforeId, stayedWithParent: true };
-  }
-
-  if (moving.parent_id === null && normalizedParentId === null && options.preferSiblingStart) {
-    return { parentId: null, beforeId: firstSiblingId(noteId, null), stayedWithParent: false };
-  }
-
-  return { parentId: normalizedParentId, beforeId: beforeId ?? null, stayedWithParent: false };
+  return {
+    parentId: normalizedParentId,
+    beforeId: beforeId ?? null,
+    stayedWithParent: Boolean(options.stayedWithParent),
+  };
 }
 
 async function moveNoteToTreePosition(noteId, parentId, beforeId, options = {}) {
@@ -520,7 +550,9 @@ async function moveNoteToTreePosition(noteId, parentId, beforeId, options = {}) 
 async function moveNoteToSiblingEdge(noteId, edge) {
   const note = getNotes().find(n => n.id === noteId);
   if (!note) return;
-  await moveNoteToTreePosition(noteId, null, null, { preferSiblingStart: edge === "start" });
+  const parentId = note.parent_id ?? null;
+  const beforeId = edge === "start" ? firstSiblingId(noteId, parentId) : null;
+  await moveNoteToTreePosition(noteId, parentId, beforeId, { stayedWithParent: true });
 }
 
 function createTreeInsertZone(parentId, beforeId) {
@@ -547,34 +579,51 @@ function createTreeInsertZone(parentId, beforeId) {
   return zone;
 }
 
-function createSiblingEdgeDropZone(edge) {
-  const zone = document.createElement("div");
-  zone.className = "root-drop-zone sibling-edge-drop-zone";
-  zone.textContent = edge === "start"
-    ? "▲ 子メモは同じ親メモ内の先頭へ移動"
-    : "▼ 子メモは同じ親メモ内の末尾へ移動";
+// ── ドラッグ中のサイドバー自動スクロール ──────────────────────────────────────
 
-  zone.addEventListener("dragover", e => {
-    e.preventDefault();
-    clearTreeDropHighlights();
-    zone.classList.add("drag-target");
-  });
-  zone.addEventListener("dragleave", () => zone.classList.remove("drag-target"));
-  zone.addEventListener("drop", async e => {
-    e.preventDefault();
-    zone.classList.remove("drag-target");
-    const id = e.dataTransfer.getData("text/plain");
-    const note = getNotes().find(n => n.id === id);
-    if (!note) return;
-    if (note.parent_id === null) {
-      showToast("子メモをドラッグしてください。");
-      return;
-    }
-    await moveNoteToTreePosition(id, null, null, { preferSiblingStart: edge === "start" });
-  });
+const TREE_AUTOSCROLL_EDGE      = 48;
+const TREE_AUTOSCROLL_MAX_SPEED = 16;
 
-  return zone;
+let treeAutoScrollRAF   = null;
+let treeAutoScrollDelta = 0;
+
+function stopTreeAutoScroll() {
+  treeAutoScrollDelta = 0;
+  if (treeAutoScrollRAF !== null) {
+    cancelAnimationFrame(treeAutoScrollRAF);
+    treeAutoScrollRAF = null;
+  }
 }
+
+function tickTreeAutoScroll() {
+  if (treeAutoScrollDelta === 0) { treeAutoScrollRAF = null; return; }
+  els.tree.scrollTop += treeAutoScrollDelta;
+  treeAutoScrollRAF = requestAnimationFrame(tickTreeAutoScroll);
+}
+
+els.tree.addEventListener("dragover", e => {
+  const rect   = els.tree.getBoundingClientRect();
+  const top    = e.clientY - rect.top;
+  const bottom = rect.bottom - e.clientY;
+
+  if (top < TREE_AUTOSCROLL_EDGE) {
+    const ratio = Math.max(0, Math.min(1, 1 - top / TREE_AUTOSCROLL_EDGE));
+    treeAutoScrollDelta = -Math.ceil(TREE_AUTOSCROLL_MAX_SPEED * ratio);
+  } else if (bottom < TREE_AUTOSCROLL_EDGE) {
+    const ratio = Math.max(0, Math.min(1, 1 - bottom / TREE_AUTOSCROLL_EDGE));
+    treeAutoScrollDelta = Math.ceil(TREE_AUTOSCROLL_MAX_SPEED * ratio);
+  } else {
+    treeAutoScrollDelta = 0;
+  }
+
+  if (treeAutoScrollDelta !== 0 && treeAutoScrollRAF === null) {
+    treeAutoScrollRAF = requestAnimationFrame(tickTreeAutoScroll);
+  }
+}, { capture: true });
+
+els.tree.addEventListener("dragleave", e => {
+  if (!els.tree.contains(e.relatedTarget)) stopTreeAutoScroll();
+}, { capture: true });
 
 // ── コンテンツ変換 ─────────────────────────────────────────────────────────────
 
@@ -788,9 +837,6 @@ function renderTree() {
     }
   });
   els.tree.appendChild(createTreeInsertZone(null, null));
-
-  els.tree.appendChild(createSiblingEdgeDropZone("start"));
-  els.tree.appendChild(createSiblingEdgeDropZone("end"));
 }
 
 function renderNode(note, treeCtx) {
@@ -848,12 +894,12 @@ function renderNode(note, treeCtx) {
 
   const addBtn = document.createElement("span");
   addBtn.className   = "tree-add";
-  addBtn.textContent = "＋";
-  addBtn.title       = "メモを追加";
+  addBtn.title       = "このメモに子メモを追加";
+  setButtonContent(addBtn, "＋", "子追加");
   row.appendChild(addBtn);
 
   row.addEventListener("click", e => {
-    if (e.target === addBtn) { e.stopPropagation(); createNote(note.id); return; }
+    if (addBtn.contains(e.target)) { e.stopPropagation(); createNote(note.id); return; }
     if (e.target === toggle && hasKids) {
       e.stopPropagation();
       state.expanded.has(note.id) ? state.expanded.delete(note.id) : state.expanded.add(note.id);
@@ -876,6 +922,7 @@ function renderNode(note, treeCtx) {
     document.body.classList.remove("is-dragging");
     state.isDraggingNote = false;
     row.classList.remove("drag-target", "drag-before");
+    stopTreeAutoScroll();
   });
   row.addEventListener("dragover", e => {
     e.preventDefault();
@@ -898,10 +945,7 @@ function renderNode(note, treeCtx) {
       if (isBefore) {
         await moveNoteToTreePosition(id, note.parent_id, note.id);
       } else {
-        await reorderNote(id, null, note.id);
-        state.expanded.add(note.id);
-        await loadNotes(); selectNote(id);
-        showToast("メモを移動しました。");
+        await moveNoteToTreePosition(id, note.id, null);
       }
     } catch (err) { showToast(err.message); }
   });
@@ -941,7 +985,7 @@ function renderEditor() {
     els.checkBtn.disabled = true;
     els.checkBtn.classList.remove("active");
     els.checkBtn.title = "チェックを付ける";
-    els.checkBtn.textContent = "☑";
+    setButtonContent(els.checkBtn, "✓", "チェックする");
     updateEmptyState();
     updateUndoButton();
     return;
@@ -949,7 +993,7 @@ function renderEditor() {
   els.checkBtn.disabled = false;
   els.checkBtn.classList.toggle("active", Boolean(note.checked));
   els.checkBtn.title = note.checked ? "チェックを外す" : "チェックを付ける";
-  els.checkBtn.textContent = note.checked ? "✅" : "☑";
+  setButtonContent(els.checkBtn, "✓", note.checked ? "チェック済み" : "チェックする");
   els.contentInput.dataset.placeholder = "ここにメモを書いてください";
   els.contentInput.contentEditable = "true";
   els.titleInput.placeholder = "タイトル";
@@ -1036,6 +1080,7 @@ async function createNote(parentId) {
       media:       [],
       pinned:      false,
       checked:     false,
+      checked_at:  null,
       order:       nextOrderForNewNote(pid),
     };
     await notesCollection().doc(note.id).set(note);
@@ -1086,7 +1131,9 @@ async function updateNote(id, payload, reload = true) {
   }
 
   if ("checked" in payload) {
-    updates.checked = Boolean(payload.checked);
+    const checked = Boolean(payload.checked);
+    updates.checked = checked;
+    updates.checked_at = checked ? nowSortableIso() : null;
   }
 
   updates.updated_at = nowIso();
@@ -1228,7 +1275,7 @@ async function deleteSelectedNote() {
 
 function renderTemplateItem(t) {
   const item = document.createElement("div");
-  item.className = `template-item${t.official ? " is-official" : ""}`;
+  item.className = `template-item${t.official ? " is-official" : ""}${state.templatePreviewId === t.id ? " is-previewing" : ""}`;
   item.dataset.id = t.id;
 
   const info = document.createElement("div");
@@ -1258,31 +1305,101 @@ function renderTemplateItem(t) {
   const actions = document.createElement("div");
   actions.className = "template-actions";
 
+  const previewActive = state.templatePreviewId === t.id;
+  const previewBtn = document.createElement("button");
+  previewBtn.className   = `template-action-btn${previewActive ? " is-active" : ""}`;
+  previewBtn.title       = previewActive ? "プレビューを閉じる" : "テンプレートの内容を見る";
+  previewBtn.setAttribute("aria-label", previewActive ? "プレビューを閉じる" : "テンプレートの内容を見る");
+  previewBtn.dataset.action = "preview";
+  setButtonContent(previewBtn, "🔍", previewActive ? "閉じる" : "内容を見る");
+
   const applyBtn = document.createElement("button");
   applyBtn.className   = "template-action-btn";
-  applyBtn.title       = "新しい親メモとして追加";
-  applyBtn.setAttribute("aria-label", "新しい親メモとして追加");
+  applyBtn.title       = "このテンプレートを親メモとして追加";
+  applyBtn.setAttribute("aria-label", "このテンプレートを親メモとして追加");
   applyBtn.dataset.action = "apply";
-  applyBtn.innerHTML = "<span aria-hidden=\"true\">＋</span><span>追加</span>";
+  setButtonContent(applyBtn, "＋", "追加する");
 
   const renameBtn = document.createElement("button");
   renameBtn.className   = "template-action-btn";
   renameBtn.title       = "名前を変更";
   renameBtn.setAttribute("aria-label", "名前を変更");
   renameBtn.dataset.action = "rename";
-  renameBtn.innerHTML = "<span aria-hidden=\"true\">✎</span><span>名前変更</span>";
+  setButtonContent(renameBtn, "✎", "名前変更");
 
   const deleteBtn = document.createElement("button");
   deleteBtn.className   = "template-action-btn ctx-danger";
   deleteBtn.title       = "削除";
   deleteBtn.setAttribute("aria-label", "削除");
   deleteBtn.dataset.action = "delete";
-  deleteBtn.innerHTML = "<span aria-hidden=\"true\">🗑</span><span>削除</span>";
+  setButtonContent(deleteBtn, "🗑", "削除");
 
-  actions.appendChild(applyBtn);
+  actions.append(previewBtn, applyBtn);
   if (!t.official) actions.append(renameBtn, deleteBtn);
   item.append(info, actions);
+  if (state.templatePreviewId === t.id) item.appendChild(renderTemplatePreview(t));
   return item;
+}
+
+function templatePreviewText(content) {
+  const raw = String(content ?? "");
+  if (!raw) return "";
+  const html = contentToHtml(raw).replace(/<br\s*\/?>/gi, "\n");
+  const holder = document.createElement("div");
+  holder.innerHTML = html;
+  return holder.textContent.replace(/\u200b/g, "").replace(/\s+/g, " ").trim();
+}
+
+function renderTemplatePreviewNode(node) {
+  const item = document.createElement("li");
+  item.className = "template-preview-node";
+
+  const title = document.createElement("p");
+  title.className = "template-preview-title";
+  title.textContent = String(node.title || "無題");
+  item.appendChild(title);
+
+  const preview = templatePreviewText(node.content);
+  const content = document.createElement("p");
+  content.className = "template-preview-content";
+  content.textContent = preview || "本文なし";
+  item.appendChild(content);
+
+  const children = node.children ?? [];
+  if (children.length > 0) {
+    const list = document.createElement("ol");
+    list.className = "template-preview-children";
+    children.forEach(child => list.appendChild(renderTemplatePreviewNode(child)));
+    item.appendChild(list);
+  }
+
+  return item;
+}
+
+function renderTemplatePreview(template) {
+  const preview = document.createElement("div");
+  preview.className = "template-preview";
+
+  const head = document.createElement("div");
+  head.className = "template-preview-head";
+
+  const title = document.createElement("p");
+  title.className = "template-preview-label";
+  title.textContent = "プレビュー";
+
+  const count = document.createElement("span");
+  count.className = "template-preview-count";
+  count.textContent = `${countTemplateNodes(template.tree)}件`;
+
+  head.append(title, count);
+  preview.appendChild(head);
+
+  const list = document.createElement("ol");
+  list.className = "template-preview-tree";
+  list.appendChild(renderTemplatePreviewNode(template.tree));
+  preview.appendChild(list);
+
+  return preview;
 }
 
 function renderTemplatesList() {
@@ -1321,12 +1438,14 @@ function appendTemplateItem(template) {
 
 function openTemplatesPanel() {
   els.templatesOverlay.hidden = false;
+  state.templatePreviewId = null;
   els.templateNameInput.value = "";
   renderTemplatesList();
 }
 
 function closeTemplatesPanel() {
   els.templatesOverlay.hidden = true;
+  state.templatePreviewId = null;
 }
 
 async function saveSelectedNoteAsTemplate() {
@@ -1410,10 +1529,16 @@ async function deleteTemplate(item, templateId, name) {
   try {
     await templatesCollection().doc(templateId).delete();
     state.templates = state.templates.filter(t => t.id !== templateId);
+    if (state.templatePreviewId === templateId) state.templatePreviewId = null;
     item.remove();
     showTemplatesEmptyIfNeeded();
     showToast("テンプレートを削除しました。");
   } catch (e) { showToast(e.message); }
+}
+
+function toggleTemplatePreview(templateId) {
+  state.templatePreviewId = state.templatePreviewId === templateId ? null : templateId;
+  renderTemplatesList();
 }
 
 els.templatesBtn  .addEventListener("click", openTemplatesPanel);
@@ -1432,6 +1557,7 @@ els.templatesList.addEventListener("click", e => {
   const id   = item?.dataset.id;
   if (!id) return;
   switch (btn.dataset.action) {
+    case "preview": toggleTemplatePreview(id); break;
     case "apply":  applyTemplate(id); break;
     case "rename": startTemplateRename(item, id); break;
     case "delete": deleteTemplate(item, id, item.querySelector(".template-name")?.textContent ?? ""); break;
@@ -2434,11 +2560,11 @@ function showCtxMenu(x, y, noteId) {
   if (pinBtn) {
     const canPin = note?.parent_id === null;
     pinBtn.hidden = !canPin;
-    pinBtn.textContent = note?.pinned ? "📌　ピン留め解除" : "📌　ピン留め";
+    pinBtn.textContent = note?.pinned ? "📌　ピン留めを解除" : "📌　ピン留め";
   }
   const checkItem = els.contextMenu.querySelector('[data-action="toggle-check"]');
   if (checkItem) {
-    checkItem.textContent = note?.checked ? "✅　チェックを外す" : "✅　チェックを付ける";
+    checkItem.textContent = note?.checked ? "✓　チェックを外す" : "✓　チェックする";
   }
   const siblingTopBtn = els.contextMenu.querySelector('[data-action="move-sibling-top"]');
   if (siblingTopBtn) {
@@ -2551,6 +2677,7 @@ document.addEventListener("dragend", () => {
   document.body.classList.remove("is-dragging");
   state.isDraggingNote = false;
   clearTreeDropHighlights();
+  stopTreeAutoScroll();
 });
 
 document.addEventListener("selectionchange", updateActiveMediaCaretFromSelection);
@@ -2789,10 +2916,45 @@ async function resendVerificationSilently(user) {
 function updateAccountUI(user) {
   if (!user) return;
   const needsVerification = !user.emailVerified;
+  els.accountMenuName.textContent   = user.displayName || "（表示名未設定）";
   els.accountMenuEmail.textContent  = user.email || "";
   els.accountMenuStatus.textContent = needsVerification ? "⚠️ メール未確認" : "✅ メール確認済み";
   els.resendVerificationBtn.hidden  = !needsVerification;
   els.refreshStatusBtn.hidden       = !needsVerification;
+}
+
+function showDisplayNameEditor() {
+  const user = auth.currentUser;
+  els.displayNameInput.value    = user?.displayName || "";
+  els.accountMenuName.hidden    = true;
+  els.editDisplayNameBtn.hidden = true;
+  els.displayNameEditRow.hidden = false;
+  els.displayNameInput.focus();
+}
+
+function hideDisplayNameEditor() {
+  els.displayNameEditRow.hidden = true;
+  els.accountMenuName.hidden    = false;
+  els.editDisplayNameBtn.hidden = false;
+}
+
+async function handleSaveDisplayName() {
+  const user = auth.currentUser;
+  if (!user) return;
+  const name = els.displayNameInput.value.trim();
+  els.displayNameSaveBtn.disabled   = true;
+  els.displayNameCancelBtn.disabled = true;
+  try {
+    await user.updateProfile({ displayName: name || null });
+    els.accountMenuName.textContent = name || "（表示名未設定）";
+    hideDisplayNameEditor();
+    showToast("表示名を変更しました。");
+  } catch (err) {
+    showToast(translateAuthError(err));
+  } finally {
+    els.displayNameSaveBtn.disabled   = false;
+    els.displayNameCancelBtn.disabled = false;
+  }
 }
 
 async function handleResendVerification() {
@@ -2980,9 +3142,22 @@ if (auth) {
       els.accountMenu.style.top   = `${rect.bottom + 6}px`;
       els.accountMenu.style.left  = "auto";
       els.accountMenu.style.right = `${window.innerWidth - rect.right}px`;
+      hideDisplayNameEditor();
       els.accountMenu.hidden = false;
     } else {
       els.accountMenu.hidden = true;
+    }
+  });
+  els.editDisplayNameBtn.addEventListener("click", showDisplayNameEditor);
+  els.displayNameCancelBtn.addEventListener("click", hideDisplayNameEditor);
+  els.displayNameSaveBtn.addEventListener("click", handleSaveDisplayName);
+  els.displayNameInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      handleSaveDisplayName();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      hideDisplayNameEditor();
     }
   });
   els.resendVerificationBtn.addEventListener("click", handleResendVerification);
