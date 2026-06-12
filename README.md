@@ -1,4 +1,4 @@
-# Memo
+# StackNote
 
 階層的にアイデアやプロジェクトを管理できる Flask 製メモ帳アプリです。
 
@@ -78,31 +78,21 @@ http://127.0.0.1:5001
 
 ## Firebase設定
 
-このアプリはFirebase Authentication（メール/パスワード）でログインします。アカウントごとにメモ・テンプレート・メディアが分離されます。
-新規登録後は確認メールが送信され、メール認証が完了するまでログイン完了・API利用はできません。
+このアプリはFirebase Authentication（メール/パスワード）でログインし、メモ・テンプレートはFirestore、添付メディアはFirebase Storageへブラウザから直接保存します（バックエンドAPIは経由しません）。アカウントごと（`uid`単位）にデータが分離されます。
+新規登録後は確認メールが送信され、メール認証が完了するまでアプリ画面は表示されません。
 
 1. [Firebaseコンソール](https://console.firebase.google.com/)で対象プロジェクトを開く
 2. 「プロジェクトの設定」→「全般」→「マイアプリ」で新しいWebアプリを登録する
-3. 表示される `firebaseConfig`（apiKey, authDomain, projectId, storageBucket, messagingSenderId, appId）を控える
+3. 表示される `firebaseConfig`（apiKey, authDomain, projectId, storageBucket, messagingSenderId, appId, measurementId）を [`static/js/firebase-config.js`](static/js/firebase-config.js) の `firebaseConfig` に貼り付ける
 4. 「Authentication」→「Sign-in method」で「メール/パスワード」プロバイダを有効にする
-5. 「プロジェクトの設定」→「サービスアカウント」→「新しい秘密鍵の生成」でJSONをダウンロードし、プロジェクトルートに `serviceAccountKey.json` として保存する（`.gitignore` 対象）
-6. 「Authentication」→「Settings」→「Authorized domains」に公開ドメイン（例: `hayo.webtool-labs.com`）を追加する
-7. 「Authentication」→「Templates」→「メールアドレスの確認」で、アクションURLを `https://<公開ドメイン>/auth/action` に設定する
+5. 「Authentication」→「Settings」→「Authorized domains」に公開ドメイン（例: `stacknote.webtool-labs.com`）を追加する
+6. 「Authentication」→「Templates」→「メールアドレスの確認」で、アクションURLを `https://<公開ドメイン>/auth/action` に設定する
+7. 「Firestore Database」を開き、本番モードでデータベースを作成する。「ルール」タブで、このリポジトリの [`firestore.rules`](firestore.rules) の内容を貼り付けてPublishする
+8. 「Storage」を開き、Storageを有効化する（**プロジェクトがSparkプランの場合、Blazeプラン（従量課金）へのアップグレードを求められることがあります**）。「Rules」タブで、このリポジトリの [`storage.rules`](storage.rules) の内容を貼り付けてPublishする
 
-`.env`（`.env.example` を参照）に以下を設定します。
+`static/js/firebase-config.js` の値（apiKeyを含む）はブラウザに公開される前提のFirebase Web設定であり、秘密情報ではないためそのままコミットして構いません。`apiKey` が空の場合、ログイン画面に「Firebaseが設定されていません」と表示されます。
 
-```bash
-FIREBASE_API_KEY=...
-FIREBASE_AUTH_DOMAIN=...
-FIREBASE_PROJECT_ID=...
-FIREBASE_STORAGE_BUCKET=...
-FIREBASE_MESSAGING_SENDER_ID=...
-FIREBASE_APP_ID=...
-```
-
-サービスアカウントは、プロジェクトルートに置いた `serviceAccountKey.json`、または `FIREBASE_SERVICE_ACCOUNT_JSON`（JSON全体を1行の文字列で設定）のどちらかで読み込まれます。
-
-これらが未設定の場合、ログイン画面に「Firebaseが設定されていません」と表示され、`/api/*` は503を返します。
+`.env`（`.env.example` を参照）の `FIREBASE_STORAGE_BUCKET` は、後述の既存データ移行スクリプト（`scripts/migrate_to_firestore.py`）専用です。
 
 ### メール認証テンプレート
 
@@ -111,7 +101,7 @@ Firebaseコンソールの「メールアドレスの確認」テンプレート
 件名:
 
 ```text
-Memo のメールアドレスの確認
+StackNote のメールアドレスの確認
 ```
 
 本文:
@@ -127,7 +117,7 @@ Memo のメールアドレスの確認
 
 よろしくお願いいたします。
 
-Memo チーム
+StackNote チーム
 ```
 
 リンクを開いた後の承認画面は `/auth/action` で表示されます。Firebaseコンソール側のアクションURLを設定していない場合、Firebase標準の英語画面が表示されます。
@@ -146,11 +136,32 @@ Gmailの迷惑メール判定はアプリのコードだけでは完全に制御
 
 ## データ保存場所
 
-メモデータはユーザーごとに `data/users/<uid>/notes.json` に保存されます。
-アップロードされたファイルはユーザーごとに `data/media/<uid>/` に保存されます。
+メモ・テンプレートは、ユーザーごとにFirestoreの以下のコレクションへブラウザから直接保存されます。
 
-初回ログイン時、既存の `data/notes.json`・`data/media/` のデータは最初にログインしたユーザーに引き継がれます（`data/users/.legacy_claimed` に記録）。元のファイルは削除されずバックアップとして残ります。
+- `users/{uid}/notes/{noteId}`
+- `users/{uid}/templates/{templateId}`
+
+添付した画像・動画はFirebase Storageの `users/{uid}/media/` 以下に保存されます。
+
+`firestore.rules`・`storage.rules` により、各ユーザーは自分の `uid` 配下のデータのみ読み書きできます。バックエンドサーバーはメモ・メディアのデータを一切経由・保存しません。
+
+## 既存データの移行（旧バージョンからのアップグレード）
+
+旧バージョン（Flask + JSONファイル保存）からアップグレードする場合、`scripts/migrate_to_firestore.py` で既存データをFirestore/Storageへ移行できます。
+
+1. このアプリで移行先アカウントを登録し、メール確認まで完了して `uid` を控える（Firebaseコンソール「Authentication」→「Users」で確認できる）
+2. 「プロジェクトの設定」→「サービスアカウント」→「新しい秘密鍵の生成」でJSONをダウンロードし、プロジェクトルートに `serviceAccountKey.json` として保存する（`.gitignore` 対象。移行スクリプト専用で、絶対にコミットしない）
+3. 旧サーバーの `data/notes.json`・`data/templates.json`・`data/media/*` を、このリポジトリの `data/` 以下の同名パスに**コピー**する（コピー元は削除しない）
+4. 依存関係をインストールして実行する
+
+```bash
+pip install firebase-admin
+python scripts/migrate_to_firestore.py --uid <uid> --dry-run
+python scripts/migrate_to_firestore.py --uid <uid>
+```
+
+`--dry-run` ではノート・テンプレートの件数とメディアファイルの解決状況のみ表示し、書き込みは行いません。元の `data/notes.json`・`data/templates.json`・`data/media/*` は移行後も削除されません。
 
 ## GitHubに上げる前の注意
 
-`.env`、`.venv/`、`uploads/`、`data/*.json`、`serviceAccountKey.json`、`data/users/` は `.gitignore` で除外しています。
+`.env`、`.venv/`、`uploads/`、`data/*.json`、`data/media/*`、`serviceAccountKey.json` は `.gitignore` で除外しています。

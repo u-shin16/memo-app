@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Memo｜階層メモ帳アプリ</title>
+  <title>StackNote｜階層メモ帳アプリ</title>
   <meta name="description" content="アイデアを階層的に整理できるシンプルなメモ帳アプリです。画像・動画の添付にも対応。">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
@@ -13,7 +13,7 @@
       <div class="brand">
         <div>
           <p class="eyebrow">Hierarchical Notes</p>
-          <h1>Memo</h1>
+          <h1>StackNote</h1>
         </div>
         <button id="newRootBtn" class="icon-btn" title="最上位メモを追加">＋</button>
         <button id="templatesBtn" class="icon-btn" title="テンプレート">🗂️</button>
@@ -70,7 +70,7 @@
   <!-- アカウント認証 -->
   <div id="authOverlay" class="auth-overlay">
     <div id="authDialog" class="auth-dialog" role="dialog" aria-modal="true">
-      <p class="auth-eyebrow">Memo</p>
+      <p class="auth-eyebrow">StackNote</p>
       <h2 id="authTitle">ログイン</h2>
 
       <div id="authNotConfigured" class="auth-not-configured" hidden>
@@ -230,12 +230,14 @@
     <button class="ctx-item ctx-danger" id="deleteAccountBtn">🗑　アカウントを削除</button>
   </div>
 
+  <script src="{{ url_for('static', filename='js/firebase-config.js') }}"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-storage-compat.js"></script>
   <script>
-    const firebaseConfig = {{ firebase_config | tojson }};
-    window.FIREBASE_READY = !!(firebaseConfig.apiKey);
-    if (window.FIREBASE_READY) firebase.initializeApp(firebaseConfig);
+    window.FIREBASE_READY = !!(window.firebaseConfig && window.firebaseConfig.apiKey);
+    if (window.FIREBASE_READY) firebase.initializeApp(window.firebaseConfig);
   </script>
   <script src="{{ url_for('static', filename='js/script.js') }}"></script>
 </body>

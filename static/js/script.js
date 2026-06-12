@@ -1,7 +1,9 @@
 // ── State ─────────────────────────────────────────────────────────────────────
 
 const state = {
+  uid:             null,
   data:            null,
+  templates:       [],
   selectedId:      null,
   expanded:        new Set(),
   saveTimer:       null,
@@ -99,7 +101,9 @@ const els = {
 
 // ── Firebase Auth ─────────────────────────────────────────────────────────────
 
-const auth = (window.FIREBASE_READY && typeof firebase !== "undefined") ? firebase.auth() : null;
+const auth    = (window.FIREBASE_READY && typeof firebase !== "undefined") ? firebase.auth() : null;
+const db      = (window.FIREBASE_READY && typeof firebase !== "undefined") ? firebase.firestore() : null;
+const storage = (window.FIREBASE_READY && typeof firebase !== "undefined") ? firebase.storage() : null;
 if (auth) auth.languageCode = "ja";
 
 // ── Toast ─────────────────────────────────────────────────────────────────────
@@ -135,29 +139,243 @@ function resolveConfirm(result) {
   });
 })();
 
-// ── API ───────────────────────────────────────────────────────────────────────
+// ── ローカルヘルパー（ID・日時・コレクション参照）──────────────────────────────────
 
-async function api(path, options = {}) {
-  const headers = { ...(options.headers || {}) };
-  if (auth?.currentUser) {
-    headers["Authorization"] = `Bearer ${await auth.currentUser.getIdToken()}`;
+function makeId() {
+  const bytes = crypto.getRandomValues(new Uint8Array(6));
+  return [...bytes].map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+function nowIso() {
+  const d   = new Date();
+  const pad = n => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` +
+         `T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+function notesCollection() {
+  return db.collection("users").doc(state.uid).collection("notes");
+}
+
+function templatesCollection() {
+  return db.collection("users").doc(state.uid).collection("templates");
+}
+
+// ── 階層・並び順ヘルパー ─────────────────────────────────────────────────────────
+
+function wouldCreateCycle(notes, noteId, newParentId) {
+  if (newParentId === null) return false;
+  let current = newParentId;
+  while (current !== null) {
+    if (current === noteId) return true;
+    const parent = notes.find(n => n.id === current);
+    current = parent ? parent.parent_id : null;
   }
-  const res  = await fetch(path, { ...options, headers });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    if (res.status === 403 && data.code === "email-not-verified" && auth?.currentUser) {
-      showVerificationScreen(auth.currentUser, data.error);
+  return false;
+}
+
+const ORDER_EPSILON = 1e-9;
+
+function siblingsOf(parentId, excludeId = null) {
+  return getChildren(parentId).filter(n => n.id !== excludeId);
+}
+
+function nextOrderForNewNote(parentId) {
+  const siblings = siblingsOf(parentId);
+  return siblings.length > 0 ? (siblings[siblings.length - 1].order ?? 0) + 1000 : 1000;
+}
+
+async function renumberSiblings(parentId) {
+  const siblings = siblingsOf(parentId);
+  const batch = db.batch();
+  const ref   = notesCollection();
+  siblings.forEach((n, i) => {
+    const order = (i + 1) * 1000;
+    n.order = order;
+    batch.update(ref.doc(n.id), { order });
+  });
+  await batch.commit();
+}
+
+async function orderForReorder(noteId, beforeId, parentId) {
+  const siblings = siblingsOf(parentId, noteId);
+  let order;
+
+  if (!beforeId) {
+    order = siblings.length > 0 ? (siblings[siblings.length - 1].order ?? 0) + 1000 : 1000;
+  } else {
+    const idx = siblings.findIndex(n => n.id === beforeId);
+    if (idx === -1) {
+      order = siblings.length > 0 ? (siblings[siblings.length - 1].order ?? 0) + 1000 : 1000;
+    } else if (idx === 0) {
+      order = (siblings[0].order ?? 1000) / 2;
+    } else {
+      order = ((siblings[idx - 1].order ?? 0) + (siblings[idx].order ?? 0)) / 2;
     }
-    throw new Error(data.error || "通信に失敗しました。");
   }
-  return data;
+
+  const collides = siblings.some(n => Math.abs((n.order ?? 0) - order) < ORDER_EPSILON);
+  if (collides) {
+    await renumberSiblings(parentId);
+    return orderForReorder(noteId, beforeId, parentId);
+  }
+  return order;
+}
+
+// ── テンプレートヘルパー ─────────────────────────────────────────────────────────
+
+const OFFICIAL_TEMPLATE_TIMESTAMP    = "2026-06-10T00:00:00";
+const RETIRED_OFFICIAL_TEMPLATE_IDS  = new Set(["official-todo", "official-diary"]);
+
+const OFFICIAL_TEMPLATES = [
+  {
+    id:         "official-dev-note",
+    name:       "開発メモ",
+    official:   true,
+    created_at: OFFICIAL_TEMPLATE_TIMESTAMP,
+    updated_at: OFFICIAL_TEMPLATE_TIMESTAMP,
+    tree: {
+      title:    "開発メモ",
+      content:  "開発中のアイデア、実装、改善案をまとめるテンプレートです。",
+      children: [
+        { title: "アイデア",     content: "今後実装したいものや、思いついたことを書き留めます。", children: [] },
+        { title: "実装メモ",     content: "作業した内容、判断したこと、参考リンクを残します。", children: [] },
+        { title: "改善案",       content: "使いにくい点や、直したい挙動を書き留めます。", children: [] },
+        { title: "不具合",       content: "再現手順、期待する動き、実際の動きをまとめます。", children: [] },
+        { title: "リリースメモ", content: "公開前に確認することや、変更点をまとめます。", children: [] },
+      ],
+    },
+  },
+];
+
+function countTemplateNodes(node) {
+  return 1 + (node.children ?? []).reduce((sum, c) => sum + countTemplateNodes(c), 0);
+}
+
+function buildTemplateTree(notes, noteId) {
+  const note     = notes.find(n => n.id === noteId);
+  const children = notes
+    .filter(n => n.parent_id === noteId)
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  return {
+    title:    note.title,
+    content:  note.content,
+    children: children.map(c => buildTemplateTree(notes, c.id)),
+  };
+}
+
+function createNotesFromTemplate(node, parentId, order) {
+  const id = makeId();
+  const ts = nowIso();
+  const note = {
+    id,
+    parent_id:   parentId,
+    title:       String(node.title || "新しいメモ").slice(0, 120),
+    content:     String(node.content || ""),
+    created_at:  ts,
+    updated_at:  ts,
+    source_file: null,
+    media:       [],
+    pinned:      false,
+    checked:     false,
+    order,
+  };
+  const created = [note];
+  (node.children ?? []).forEach((child, i) => {
+    created.push(...createNotesFromTemplate(child, id, (i + 1) * 1000));
+  });
+  return created;
+}
+
+async function ensureOfficialTemplates(uid) {
+  const ref   = db.collection("users").doc(uid).collection("templates");
+  const snap  = await ref.get();
+  const byId  = new Map();
+  const batch = db.batch();
+  let hasWrites = false;
+
+  snap.docs.forEach(doc => {
+    if (RETIRED_OFFICIAL_TEMPLATE_IDS.has(doc.id)) {
+      batch.delete(doc.ref);
+      hasWrites = true;
+      return;
+    }
+    byId.set(doc.id, { id: doc.id, ...doc.data() });
+  });
+
+  for (const official of OFFICIAL_TEMPLATES) {
+    const current = byId.get(official.id);
+    if (!current) {
+      batch.set(ref.doc(official.id), official);
+      byId.set(official.id, { ...official });
+      hasWrites = true;
+      continue;
+    }
+    const updates = {};
+    for (const key of ["name", "official", "tree"]) {
+      if (JSON.stringify(current[key]) !== JSON.stringify(official[key])) {
+        updates[key] = official[key];
+      }
+    }
+    if (current.created_at === undefined) updates.created_at = official.created_at;
+    if (current.updated_at !== official.updated_at) updates.updated_at = official.updated_at;
+    if (Object.keys(updates).length > 0) {
+      batch.update(ref.doc(official.id), updates);
+      Object.assign(current, updates);
+      hasWrites = true;
+    }
+  }
+
+  if (hasWrites) await batch.commit();
+  return [...byId.values()];
+}
+
+// ── 一括削除（アカウント削除）────────────────────────────────────────────────────
+
+async function deleteCollectionInBatches(ref, batchSize = 500) {
+  for (;;) {
+    const snap = await ref.limit(batchSize).get();
+    if (snap.empty) return;
+    const batch = db.batch();
+    snap.docs.forEach(doc => batch.delete(doc.ref));
+    await batch.commit();
+    if (snap.size < batchSize) return;
+  }
+}
+
+async function deleteStoragePrefix(prefix) {
+  const ref = storage.ref(prefix);
+  let pageToken;
+  do {
+    const res = await ref.list({ maxResults: 1000, pageToken });
+    await Promise.all(res.items.map(item => item.delete().catch(() => {})));
+    pageToken = res.nextPageToken;
+  } while (pageToken);
+}
+
+// ── メディアヘルパー ─────────────────────────────────────────────────────────────
+
+function pruneOrphanedMedia(note, newContent) {
+  const kept = [];
+  for (const item of (note.media ?? [])) {
+    if (item.downloadURL && newContent.includes(item.downloadURL)) {
+      kept.push(item);
+    } else if (item.storagePath) {
+      storage.ref(item.storagePath).delete().catch(() => {});
+    }
+  }
+  return kept;
 }
 
 // ── Note helpers ──────────────────────────────────────────────────────────────
 
 function getNotes()        { return state.data?.notes ?? []; }
 function getSelectedNote() { return getNotes().find(n => n.id === state.selectedId) ?? null; }
-function getChildren(pid)  { return getNotes().filter(n => n.parent_id === pid); }
+function getChildren(pid) {
+  return getNotes()
+    .filter(n => n.parent_id === pid)
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+}
 
 function getParentChain(note) {
   const chain = [];
@@ -285,7 +503,6 @@ async function moveNoteToTreePosition(noteId, parentId, beforeId, options = {}) 
   try {
     await reorderNote(noteId, target.beforeId, target.parentId);
     if (target.parentId) state.expanded.add(target.parentId);
-    await loadNotes();
     selectNote(noteId);
     showToast(target.stayedWithParent ? "同じ親メモ内で並び替えました。" :
               parentChanged ? "メモを移動しました。" : "並び替えました。");
@@ -491,16 +708,14 @@ async function applyUndoSnapshot(snapshot) {
 async function restoreDeletedNotes(snapshot) {
   state.isApplyingUndo = true;
   try {
-    await api("/api/notes/restore", {
-      method:  "POST",
-      headers: { "Content-Type": "application/json" },
-      body:    JSON.stringify({
-        notes:        snapshot.notes,
-        insert_index: snapshot.insertIndex,
-      }),
-    });
+    const batch = db.batch();
+    const ref   = notesCollection();
+    for (const note of snapshot.notes) {
+      batch.set(ref.doc(note.id), note);
+    }
+    await batch.commit();
+    state.data.notes.push(...cloneData(snapshot.notes));
     state.selectedId = snapshot.noteId;
-    await loadNotes();
     selectNote(snapshot.noteId);
     showToast("削除したメモを復元しました。");
   } catch (e) {
@@ -737,10 +952,10 @@ function renderEditor() {
 
   // 旧 media 配列 → インライン figure に変換（一度 content に書き込まれるとスキップ）
   for (const item of (note.media ?? [])) {
-    if (html.includes(item.filename)) continue;
-    const url     = `/media/${item.filename}`;
+    if (!item.downloadURL || html.includes(item.downloadURL)) continue;
+    const url     = item.downloadURL;
     const isVideo = (item.mime_type || "").startsWith("video/") ||
-                    /\.(mp4|mov|avi|webm|m4v|mkv)$/i.test(item.filename);
+                    /\.(mp4|mov|avi|webm|m4v|mkv)$/i.test(item.filename || "");
     const alt     = (item.original_name || "").replace(/"/g, "&quot;");
     html += isVideo
       ? `<figure class="inline-media-figure" contenteditable="false" draggable="false">` +
@@ -788,7 +1003,8 @@ async function saveCurrentEditorNow() {
 // ── Note CRUD ─────────────────────────────────────────────────────────────────
 
 async function loadNotes() {
-  state.data = await api("/api/notes");
+  const snap = await notesCollection().get();
+  state.data = { notes: snap.docs.map(d => ({ ...d.data(), id: d.id })) };
   if (!state.selectedId || !getSelectedNote()) {
     const roots = getNotes().filter(n => n.parent_id === null);
     state.selectedId = roots.length > 0 ? roots[0].id : null;
@@ -799,13 +1015,24 @@ async function loadNotes() {
 
 async function createNote(parentId) {
   try {
-    const note = await api("/api/notes", {
-      method:  "POST",
-      headers: { "Content-Type": "application/json" },
-      body:    JSON.stringify({ parent_id: parentId ?? null, title: "新しいメモ", content: "" }),
-    });
+    const pid = parentId ?? null;
+    const ts  = nowIso();
+    const note = {
+      id:          makeId(),
+      parent_id:   pid,
+      title:       "新しいメモ",
+      content:     "",
+      created_at:  ts,
+      updated_at:  ts,
+      source_file: null,
+      media:       [],
+      pinned:      false,
+      checked:     false,
+      order:       nextOrderForNewNote(pid),
+    };
+    await notesCollection().doc(note.id).set(note);
+    state.data.notes.push(note);
     if (parentId) state.expanded.add(parentId);
-    await loadNotes();
     selectNote(note.id);
     els.titleInput.focus(); els.titleInput.select();
     showToast("メモを追加しました。");
@@ -813,25 +1040,88 @@ async function createNote(parentId) {
 }
 
 async function updateNote(id, payload, reload = true) {
-  const note = await api(`/api/notes/${id}`, {
-    method:  "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body:    JSON.stringify(payload),
-  });
+  const note = state.data.notes.find(n => n.id === id);
+  if (!note) throw new Error("メモが見つかりません。");
+
+  const updates = {};
+
+  if ("title" in payload) {
+    const title = String(payload.title ?? "").slice(0, 120);
+    updates.title = title || "無題";
+  }
+
+  if ("content" in payload) {
+    const content = String(payload.content ?? "");
+    updates.content = content;
+    updates.media = pruneOrphanedMedia(note, content);
+  }
+
+  if ("parent_id" in payload) {
+    const newParentId = payload.parent_id;
+    if (newParentId !== null && !getNotes().find(n => n.id === newParentId)) {
+      throw new Error("移動先のメモが見つかりません。");
+    }
+    if (wouldCreateCycle(getNotes(), id, newParentId)) {
+      throw new Error("自分自身の下には移動できません。");
+    }
+    updates.parent_id = newParentId;
+    if (newParentId !== null) updates.pinned = false;
+  }
+
+  if ("pinned" in payload) {
+    const pinned = Boolean(payload.pinned);
+    const parentId = "parent_id" in updates ? updates.parent_id : note.parent_id;
+    if (pinned && parentId !== null) {
+      throw new Error("ピン留めできるのは最上位メモだけです。");
+    }
+    updates.pinned = pinned;
+  }
+
+  if ("checked" in payload) {
+    updates.checked = Boolean(payload.checked);
+  }
+
+  updates.updated_at = nowIso();
+
+  await notesCollection().doc(id).update(updates);
+  Object.assign(note, updates);
+
   if (reload) {
-    const idx = state.data.notes.findIndex(n => n.id === id);
-    if (idx >= 0) state.data.notes[idx] = note;
     renderTree(); renderEditor();
   }
   return note;
 }
 
 async function reorderNote(noteId, beforeId, parentId) {
-  return api("/api/reorder", {
-    method:  "POST",
-    headers: { "Content-Type": "application/json" },
-    body:    JSON.stringify({ note_id: noteId, before_id: beforeId, parent_id: parentId }),
-  });
+  const note = getNotes().find(n => n.id === noteId);
+  if (!note) throw new Error("メモが見つかりません。");
+  if (beforeId === noteId) return note;
+
+  if (parentId !== null && !getNotes().find(n => n.id === parentId)) {
+    throw new Error("移動先のメモが見つかりません。");
+  }
+  if (beforeId) {
+    const beforeNote = getNotes().find(n => n.id === beforeId);
+    if (!beforeNote) throw new Error("挿入先のメモが見つかりません。");
+    if (beforeNote.parent_id !== parentId) {
+      throw new Error("同じ階層の間にのみ並び替えできます。");
+    }
+  }
+  if (wouldCreateCycle(getNotes(), noteId, parentId)) {
+    throw new Error("自分自身の下には移動できません。");
+  }
+
+  const order = await orderForReorder(noteId, beforeId, parentId);
+  const updates = {
+    parent_id:  parentId,
+    order,
+    updated_at: nowIso(),
+  };
+  if (parentId !== null) updates.pinned = false;
+
+  await notesCollection().doc(noteId).update(updates);
+  Object.assign(note, updates);
+  return note;
 }
 
 async function togglePinnedNote(noteId) {
@@ -904,10 +1194,24 @@ async function deleteSelectedNote() {
     if (!target) return;
     const parentId = target.parent_id;
     const deleteSnapshot = snapshotDeletedNotes(target.id);
-    await api(`/api/notes/${target.id}`, { method: "DELETE" });
+    const deleteIds = deleteSnapshot.notes.map(n => n.id);
+
+    const ref = notesCollection();
+    const CHUNK = 450;
+    for (let i = 0; i < deleteIds.length; i += CHUNK) {
+      const batch = db.batch();
+      deleteIds.slice(i, i + CHUNK).forEach(id => batch.delete(ref.doc(id)));
+      await batch.commit();
+    }
+
+    state.data.notes = state.data.notes.filter(n => !deleteIds.includes(n.id));
     pushUndoSnapshot(deleteSnapshot);
     state.selectedId = parentId;
-    await loadNotes();
+    if (!state.selectedId || !getSelectedNote()) {
+      const roots = getNotes().filter(n => n.parent_id === null);
+      state.selectedId = roots.length > 0 ? roots[0].id : null;
+    }
+    selectNote(state.selectedId);
     showToast("削除しました。");
   } catch (e) { showToast(e.message); }
 }
@@ -939,7 +1243,7 @@ function renderTemplateItem(t) {
 
   const meta = document.createElement("span");
   meta.className   = "template-meta";
-  meta.textContent = `${t.note_count}件のメモ`;
+  meta.textContent = `${countTemplateNodes(t.tree)}件のメモ`;
 
   info.append(titleLine, meta);
 
@@ -973,12 +1277,12 @@ function renderTemplateItem(t) {
   return item;
 }
 
-async function renderTemplatesList() {
-  let templates = [];
-  try {
-    const data = await api("/api/templates");
-    templates = data.templates ?? [];
-  } catch (e) { showToast(e.message); }
+function renderTemplatesList() {
+  const templates = [...state.templates].sort((a, b) => {
+    const officialDiff = Number(Boolean(b.official)) - Number(Boolean(a.official));
+    if (officialDiff !== 0) return officialDiff;
+    return (a.created_at ?? "").localeCompare(b.created_at ?? "");
+  });
 
   els.templatesList.innerHTML = "";
   if (templates.length === 0) {
@@ -1007,10 +1311,10 @@ function appendTemplateItem(template) {
   els.templatesList.appendChild(renderTemplateItem(template));
 }
 
-async function openTemplatesPanel() {
+function openTemplatesPanel() {
   els.templatesOverlay.hidden = false;
   els.templateNameInput.value = "";
-  await renderTemplatesList();
+  renderTemplatesList();
 }
 
 function closeTemplatesPanel() {
@@ -1024,11 +1328,17 @@ async function saveSelectedNoteAsTemplate() {
   if (!name) { showToast("テンプレート名を入力してください。"); return; }
   try {
     await saveCurrentEditorNow();
-    const template = await api("/api/templates", {
-      method:  "POST",
-      headers: { "Content-Type": "application/json" },
-      body:    JSON.stringify({ note_id: note.id, name }),
-    });
+    const ts = nowIso();
+    const template = {
+      id:         makeId(),
+      name:       name.slice(0, 120),
+      official:   false,
+      created_at: ts,
+      updated_at: ts,
+      tree:       buildTemplateTree(getNotes(), note.id),
+    };
+    await templatesCollection().doc(template.id).set(template);
+    state.templates.push(template);
     els.templateNameInput.value = "";
     appendTemplateItem(template);
     showToast("テンプレートを保存しました。");
@@ -1051,13 +1361,11 @@ function startTemplateRename(item, templateId) {
     input.replaceWith(nameEl);
     if (val !== orig) {
       try {
-        await api(`/api/templates/${templateId}`, {
-          method:  "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body:    JSON.stringify({ name: val }),
-        });
+        await templatesCollection().doc(templateId).update({ name: val, updated_at: nowIso() });
+        const t = state.templates.find(t => t.id === templateId);
+        if (t) t.name = val;
         showToast("名前を変更しました。");
-      } catch (e) { showToast(e.message); await renderTemplatesList(); }
+      } catch (e) { showToast(e.message); renderTemplatesList(); }
     }
   }
   function cancel() { if (done) return; done = true; nameEl.textContent = orig; input.replaceWith(nameEl); }
@@ -1070,20 +1378,20 @@ function startTemplateRename(item, templateId) {
 
 async function applyTemplate(templateId) {
   try {
-    const result = await api(`/api/templates/${templateId}/apply`, {
-      method:  "POST",
-      headers: { "Content-Type": "application/json" },
-      body:    JSON.stringify({ parent_id: null }),
-    });
+    const template = state.templates.find(t => t.id === templateId);
+    if (!template) throw new Error("テンプレートが見つかりません。");
+
+    const created = createNotesFromTemplate(template.tree, null, nextOrderForNewNote(null));
+    created[0].title = String(template.name || "新しいメモ").slice(0, 120);
+
+    const batch = db.batch();
+    const ref   = notesCollection();
+    created.forEach(n => batch.set(ref.doc(n.id), n));
+    await batch.commit();
+
     closeTemplatesPanel();
-    const createdNotes = result.notes ?? [];
-    if (state.data?.notes && createdNotes.length > 0) {
-      state.data.notes.push(...createdNotes);
-      selectNote(result.root_id);
-    } else {
-      await loadNotes();
-      selectNote(result.root_id);
-    }
+    state.data.notes.push(...created);
+    selectNote(created[0].id);
     showToast("テンプレートを親メモとして追加しました。");
   } catch (e) { showToast(e.message); }
 }
@@ -1092,7 +1400,8 @@ async function deleteTemplate(item, templateId, name) {
   const ok = await showConfirm(`テンプレート「${name}」を削除しますか？`);
   if (!ok) return;
   try {
-    await api(`/api/templates/${templateId}`, { method: "DELETE" });
+    await templatesCollection().doc(templateId).delete();
+    state.templates = state.templates.filter(t => t.id !== templateId);
     item.remove();
     showTemplatesEmptyIfNeeded();
     showToast("テンプレートを削除しました。");
@@ -1124,15 +1433,33 @@ els.templatesList.addEventListener("click", e => {
 // ── Media ─────────────────────────────────────────────────────────────────────
 
 async function uploadMedia(noteId, files) {
+  const note = state.data.notes.find(n => n.id === noteId);
+  if (!note) return;
+
   for (const file of files) {
     if (!file.type.startsWith("image/") && !file.type.startsWith("video/")) {
       showToast(`${file.name}: 画像・動画ファイルのみ添付できます。`);
       continue;
     }
-    const fd = new FormData();
-    fd.append("file", file);
     try {
-      const item = await api(`/api/notes/${noteId}/media`, { method: "POST", body: fd });
+      const ext         = (file.name.match(/\.([^.\/]+)$/)?.[1] || "bin").toLowerCase();
+      const mediaId     = makeId();
+      const storagePath = `users/${state.uid}/media/${mediaId}.${ext}`;
+      const fileRef     = storage.ref(storagePath);
+      await fileRef.put(file, { contentType: file.type });
+      const downloadURL = await fileRef.getDownloadURL();
+      const item = {
+        id:            mediaId,
+        filename:      storagePath,
+        original_name: file.name,
+        mime_type:     file.type,
+        created_at:    nowIso(),
+        storagePath,
+        downloadURL,
+      };
+      const updates = { media: [...(note.media ?? []), item], updated_at: nowIso() };
+      await notesCollection().doc(noteId).update(updates);
+      Object.assign(note, updates);
       insertMediaElement(item);
     } catch (e) { showToast(`${file.name}: ${e.message}`); }
   }
@@ -1565,7 +1892,7 @@ function redirectMediaCaretTyping() {
 }
 
 function insertMediaElement(item) {
-  const url     = `/media/${item.filename}`;
+  const url     = item.downloadURL;
   const isVideo = item.mime_type.startsWith("video/") ||
                   /\.(mp4|mov|avi|webm|m4v|mkv)$/i.test(item.filename);
 
@@ -1874,14 +2201,26 @@ async function confirmCrop() {
     const blob = await new Promise((res, rej) =>
       tmpCanvas.toBlob(b => b ? res(b) : rej(new Error("変換失敗")), "image/png")
     );
-    const file = new File([blob], "cropped.png", { type: "image/png" });
-    const fd   = new FormData();
-    fd.append("file", file);
-    const item = await api(`/api/notes/${state.selectedId}/media`, { method: "POST", body: fd });
+    const note        = getSelectedNote();
+    const mediaId     = makeId();
+    const storagePath = `users/${state.uid}/media/${mediaId}.png`;
+    const fileRef     = storage.ref(storagePath);
+    await fileRef.put(blob, { contentType: "image/png" });
+    const downloadURL = await fileRef.getDownloadURL();
+    const item = {
+      id:            mediaId,
+      filename:      storagePath,
+      original_name: "cropped.png",
+      mime_type:     "image/png",
+      created_at:    nowIso(),
+      storagePath,
+      downloadURL,
+    };
+    note.media = [...(note.media ?? []), item];
 
     // DOM の img src を新しいファイルに差し替え
     imgEl.addEventListener("load", () => scheduleMediaCaretSync(), { once: true });
-    imgEl.src = `/media/${item.filename}`;
+    imgEl.src = downloadURL;
     imgEl.alt = item.original_name;
     scheduleMediaCaretSync();
 
@@ -2447,9 +2786,12 @@ async function handleResendVerification() {
     await user.reload();
     if (user.emailVerified) {
       updateAccountUI(user);
-      await user.getIdToken(true);
+      state.uid = user.uid;
       showApp();
-      try { await loadNotes(); } catch (e) { showToast(e.message); }
+      try {
+        state.templates = await ensureOfficialTemplates(user.uid);
+        await loadNotes();
+      } catch (e) { showToast(e.message); }
       showToast("メール確認済みです。");
       return;
     }
@@ -2466,9 +2808,12 @@ async function handleRefreshStatus() {
     await user.reload();
     updateAccountUI(user);
     if (user.emailVerified) {
-      await user.getIdToken(true);
+      state.uid = user.uid;
       showApp();
-      try { await loadNotes(); } catch (e) { showToast(e.message); }
+      try {
+        state.templates = await ensureOfficialTemplates(user.uid);
+        await loadNotes();
+      } catch (e) { showToast(e.message); }
       showToast("メール確認済みです。");
     } else {
       showVerificationScreen(user, "まだメール確認が完了していません。メールのリンクを開いてから更新してください。");
@@ -2491,11 +2836,23 @@ async function handleDeleteAccount() {
     "削除する"
   );
   if (!ok) return;
+  const user = auth.currentUser;
+  if (!user) return;
+  const userRef = db.collection("users").doc(user.uid);
   try {
-    await api("/api/account", { method: "DELETE" });
-    await auth.signOut();
+    await deleteCollectionInBatches(userRef.collection("notes"));
+    await deleteCollectionInBatches(userRef.collection("templates"));
+    await userRef.delete().catch(() => {});
+    await deleteStoragePrefix(`users/${user.uid}/media`);
+    await user.delete();
     showToast("アカウントを削除しました。");
-  } catch (e) { showToast(e.message); }
+  } catch (e) {
+    if (e && e.code === "auth/requires-recent-login") {
+      showToast("セキュリティのため、一度ログアウトして再度ログインしてから削除してください。");
+    } else {
+      showToast(e.message);
+    }
+  }
 }
 
 async function handleDeleteUnverifiedAccount() {
@@ -2553,7 +2910,6 @@ if (auth) {
             );
             return;
           }
-          await cred.user.getIdToken(true);
         }
       }
     } catch (err) {
@@ -2610,11 +2966,15 @@ if (!auth) {
         return;
       }
 
-      await user.getIdToken(true);
+      state.uid = user.uid;
       showApp();
       updateAccountUI(user);
-      try { await loadNotes(); } catch (e) { showToast(e.message); }
+      try {
+        state.templates = await ensureOfficialTemplates(user.uid);
+        await loadNotes();
+      } catch (e) { showToast(e.message); }
     } else {
+      state.uid = null;
       showAuthScreen();
     }
   });
