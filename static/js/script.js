@@ -106,6 +106,14 @@ const db      = (window.FIREBASE_READY && typeof firebase !== "undefined") ? fir
 const storage = (window.FIREBASE_READY && typeof firebase !== "undefined") ? firebase.storage() : null;
 if (auth) auth.languageCode = "ja";
 
+// Firebase Storage は現在Sparkプラン（無料）では利用できないため、
+// Blazeプランへアップグレードするまでメディア機能（画像・動画の添付・トリミング）を無効化する。
+const STORAGE_ENABLED = false;
+if (!STORAGE_ENABLED) {
+  els.mediaBtn.hidden = true;
+  if (els.mediaTrimBtn) els.mediaTrimBtn.hidden = true;
+}
+
 // ── Toast ─────────────────────────────────────────────────────────────────────
 
 function showToast(message) {
@@ -360,7 +368,7 @@ function pruneOrphanedMedia(note, newContent) {
   for (const item of (note.media ?? [])) {
     if (item.downloadURL && newContent.includes(item.downloadURL)) {
       kept.push(item);
-    } else if (item.storagePath) {
+    } else if (item.storagePath && STORAGE_ENABLED) {
       storage.ref(item.storagePath).delete().catch(() => {});
     }
   }
@@ -1433,6 +1441,10 @@ els.templatesList.addEventListener("click", e => {
 // ── Media ─────────────────────────────────────────────────────────────────────
 
 async function uploadMedia(noteId, files) {
+  if (!STORAGE_ENABLED) {
+    showToast("画像・動画の添付は現在利用できません（Firebase Storage未対応）。");
+    return;
+  }
   const note = state.data.notes.find(n => n.id === noteId);
   if (!note) return;
 
@@ -2178,6 +2190,11 @@ els.cropCanvas.addEventListener("pointerup",     () => { _crop.drag = null; });
 els.cropCanvas.addEventListener("pointercancel", () => { _crop.drag = null; });
 
 async function confirmCrop() {
+  if (!STORAGE_ENABLED) {
+    closeCropModal();
+    showToast("トリミング機能は現在利用できません（Firebase Storage未対応）。");
+    return;
+  }
   const { figure, imgEl, scale, rect } = _crop;
   if (!figure || !imgEl) return;
 
@@ -2858,23 +2875,23 @@ async function handleDeleteAccount(e) {
 
     console.log("[deleteAccount] deleting users/{uid}/notes ...");
     await deleteCollectionInBatches(userRef.collection("notes"));
+    console.log("[deleteAccount] notes deleted");
 
     console.log("[deleteAccount] deleting users/{uid}/templates ...");
     await deleteCollectionInBatches(userRef.collection("templates"));
+    console.log("[deleteAccount] templates deleted");
 
     console.log("[deleteAccount] deleting users/{uid} document ...");
-    await userRef.delete().catch(err => console.warn("[deleteAccount] users/{uid} doc delete skipped:", err));
+    await userRef.delete().catch(err => console.warn("[deleteAccount] users/{uid} doc delete error:", err));
+    console.log("[deleteAccount] user document deleted");
 
-    console.log("[deleteAccount] deleting Storage media ...");
-    await deleteStoragePrefix(`users/${user.uid}/media`).catch(err => console.warn("[deleteAccount] media delete skipped:", err));
-
-    console.log("[deleteAccount] deleting Firebase Auth user ...");
+    console.log("[deleteAccount] deleting auth user ...");
     await user.delete();
+    console.log("[deleteAccount] auth user deleted");
 
-    console.log("[deleteAccount] success");
-    showToast("アカウントを削除しました。");
     state.uid = null;
     showAuthScreen();
+    showToast("アカウントを削除しました。");
   } catch (err) {
     console.error("[deleteAccount] failed:", err);
     if (err && err.code === "auth/requires-recent-login") {
@@ -2884,6 +2901,7 @@ async function handleDeleteAccount(e) {
     }
   } finally {
     els.deleteAccountBtn.disabled = false;
+    console.log("[deleteAccount] finished");
   }
 }
 
