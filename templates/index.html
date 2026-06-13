@@ -32,6 +32,10 @@
 
     <aside id="sidebar" class="sidebar">
       <div class="brand">
+        <button id="mindMapBtn" class="mindmap-switch-btn" type="button" title="マインドマップを開く" aria-label="マインドマップを開く">
+          <span class="btn-icon" aria-hidden="true">✣</span>
+          <span class="btn-label">マインドマップ</span>
+        </button>
         <div>
           <p class="eyebrow">Hierarchical Notes</p>
           <h1>StackNote</h1>
@@ -262,6 +266,82 @@
         <div id="templatesList" class="templates-list"></div>
       </div>
     </div>
+  </div>
+
+  <!-- マインドマップ -->
+  <div id="mindMapOverlay" class="mindmap-overlay" hidden>
+    <section class="mindmap-panel" role="dialog" aria-modal="true" aria-label="マインドマップ">
+      <header class="mindmap-head">
+        <button id="mindMapClose" class="mindmap-switch-btn" type="button" title="メモに戻る" aria-label="メモに戻る">
+          <span class="btn-icon" aria-hidden="true">📝</span>
+          <span class="btn-label">メモ</span>
+        </button>
+        <button id="mindMapListBtn" class="mindmap-tool-btn" type="button" title="マインドマップ一覧" aria-label="マインドマップ一覧" aria-haspopup="true" aria-expanded="false">
+          <span class="btn-icon" aria-hidden="true">🗂️</span>
+          <span class="btn-label">一覧</span>
+        </button>
+        <div class="mindmap-title-wrap">
+          <p class="mindmap-eyebrow">Mind Map</p>
+          <input id="mindMapTitleInput" class="mindmap-title-input" type="text" maxlength="80" placeholder="マインドマップ名">
+        </div>
+        <div class="mindmap-head-actions">
+          <button id="mindMapNewBtn" class="mindmap-tool-btn" type="button" title="新規マップ">
+            <span class="btn-icon" aria-hidden="true">＋</span>
+            <span class="btn-label">新規</span>
+          </button>
+        </div>
+      </header>
+
+      <div id="mindMapListPanel" class="context-menu mindmap-list-panel" hidden>
+        <p class="mindmap-list-header">マインドマップ一覧</p>
+        <ul id="mindMapListItems" class="mindmap-list-items"></ul>
+      </div>
+
+      <div class="mindmap-body">
+        <aside class="mindmap-tools">
+          <div class="mindmap-tool-grid">
+            <button id="mindMapAddChildBtn" class="mindmap-tool-btn" type="button" title="選択ノードに子ノードを追加">
+              <span class="btn-icon" aria-hidden="true">＋</span>
+              <span class="btn-label">子ノード</span>
+            </button>
+            <button id="mindMapAddSiblingBtn" class="mindmap-tool-btn" type="button" title="選択ノードと同じ階層に追加">
+              <span class="btn-icon" aria-hidden="true">↳</span>
+              <span class="btn-label">同階層</span>
+            </button>
+            <button id="mindMapDeleteNodeBtn" class="mindmap-tool-btn danger" type="button" title="選択ノードを削除">
+              <span class="btn-icon" aria-hidden="true">🗑</span>
+              <span class="btn-label">削除</span>
+            </button>
+            <button id="mindMapCenterBtn" class="mindmap-tool-btn" type="button" title="中央に戻す">
+              <span class="btn-icon" aria-hidden="true">◎</span>
+              <span class="btn-label">中央</span>
+            </button>
+          </div>
+
+          <label class="mindmap-field">
+            <span>選択ノード</span>
+            <input id="mindMapNodeTitleInput" type="text" maxlength="80" placeholder="ノード名">
+          </label>
+
+          <div class="mindmap-zoom-row">
+            <button id="mindMapZoomOutBtn" class="mindmap-icon-btn" type="button" title="縮小" aria-label="縮小">－</button>
+            <span id="mindMapZoomLabel" class="mindmap-zoom-label">100%</span>
+            <button id="mindMapZoomInBtn" class="mindmap-icon-btn" type="button" title="拡大" aria-label="拡大">＋</button>
+          </div>
+
+          <p id="mindMapStatus" class="mindmap-status">準備中...</p>
+        </aside>
+
+        <div id="mindMapCanvas" class="mindmap-canvas">
+          <div id="mindMapScene" class="mindmap-scene">
+            <svg id="mindMapSvg" class="mindmap-svg" viewBox="0 0 2600 1800" aria-hidden="true">
+              <g id="mindMapLinks"></g>
+            </svg>
+            <div id="mindMapNodes" class="mindmap-nodes"></div>
+          </div>
+        </div>
+      </div>
+    </section>
   </div>
 
   <!-- 右クリックコンテキストメニュー -->

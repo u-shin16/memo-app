@@ -5,6 +5,17 @@ const state = {
   data:            null,
   templates:       [],
   templatePreviewId: null,
+  mindMap:         null,
+  mindMapList:     [],
+  mindMapLoaded:   false,
+  mindMapSelectedId: null,
+  mindMapSaveTimer: null,
+  mindMapZoom:     1,
+  mindMapPanX:     0,
+  mindMapPanY:     0,
+  mindMapCentered: false,
+  mindMapPanning:  null,
+  mindMapNodeDrag: null,
   selectedId:      null,
   expanded:        new Set(),
   saveTimer:       null,
@@ -37,6 +48,27 @@ const els = {
   saveStatus:       document.getElementById("saveStatus"),
   searchInput:      document.getElementById("searchInput"),
   newRootBtn:       document.getElementById("newRootBtn"),
+  mindMapBtn:       document.getElementById("mindMapBtn"),
+  mindMapOverlay:   document.getElementById("mindMapOverlay"),
+  mindMapClose:     document.getElementById("mindMapClose"),
+  mindMapListBtn:   document.getElementById("mindMapListBtn"),
+  mindMapListPanel: document.getElementById("mindMapListPanel"),
+  mindMapListItems: document.getElementById("mindMapListItems"),
+  mindMapTitleInput: document.getElementById("mindMapTitleInput"),
+  mindMapNewBtn:    document.getElementById("mindMapNewBtn"),
+  mindMapAddChildBtn: document.getElementById("mindMapAddChildBtn"),
+  mindMapAddSiblingBtn: document.getElementById("mindMapAddSiblingBtn"),
+  mindMapDeleteNodeBtn: document.getElementById("mindMapDeleteNodeBtn"),
+  mindMapCenterBtn: document.getElementById("mindMapCenterBtn"),
+  mindMapNodeTitleInput: document.getElementById("mindMapNodeTitleInput"),
+  mindMapZoomOutBtn: document.getElementById("mindMapZoomOutBtn"),
+  mindMapZoomInBtn: document.getElementById("mindMapZoomInBtn"),
+  mindMapZoomLabel: document.getElementById("mindMapZoomLabel"),
+  mindMapStatus:    document.getElementById("mindMapStatus"),
+  mindMapCanvas:    document.getElementById("mindMapCanvas"),
+  mindMapScene:     document.getElementById("mindMapScene"),
+  mindMapLinks:     document.getElementById("mindMapLinks"),
+  mindMapNodes:     document.getElementById("mindMapNodes"),
   templatesBtn:     document.getElementById("templatesBtn"),
   templatesOverlay: document.getElementById("templatesOverlay"),
   templatesClose:   document.getElementById("templatesClose"),
@@ -237,6 +269,10 @@ function notesCollection() {
 
 function templatesCollection() {
   return db.collection("users").doc(state.uid).collection("templates");
+}
+
+function mindMapsCollection() {
+  return db.collection("users").doc(state.uid).collection("mindmaps");
 }
 
 // ── 階層・並び順ヘルパー ─────────────────────────────────────────────────────────
@@ -1634,6 +1670,855 @@ els.templatesList.addEventListener("click", e => {
   }
 });
 
+// ── Mind map ──────────────────────────────────────────────────────────────────
+
+const MINDMAP_SCENE_WIDTH  = 2600;
+const MINDMAP_SCENE_HEIGHT = 1800;
+const MINDMAP_CENTER_X     = MINDMAP_SCENE_WIDTH / 2;
+const MINDMAP_CENTER_Y     = MINDMAP_SCENE_HEIGHT / 2;
+const MINDMAP_X_GAP        = 280;
+const MINDMAP_Y_GAP        = 92;
+const MINDMAP_NODE_HALF_W  = 86;
+
+function createDefaultMindMap(id = makeId()) {
+  const rootId = makeId();
+  const ts = nowIso();
+  return {
+    id,
+    title: "新しいマインドマップ",
+    created_at: ts,
+    updated_at: ts,
+    selected_node_id: rootId,
+    nodes: [{
+      id: rootId,
+      parent_id: null,
+      title: "中心テーマ",
+      order: 1000,
+      x: null,
+      y: null,
+    }],
+  };
+}
+
+function normalizeMindMap(raw, id) {
+  const fallback = createDefaultMindMap(id);
+  const nodes = Array.isArray(raw?.nodes) ? raw.nodes : fallback.nodes;
+  const cleaned = nodes
+    .filter(node => node && node.id)
+    .map((node, index) => ({
+      id: String(node.id),
+      parent_id: node.parent_id ?? null,
+      title: String(node.title || "トピック").slice(0, 80),
+      order: Number.isFinite(Number(node.order)) ? Number(node.order) : (index + 1) * 1000,
+      x: Number.isFinite(node.x) ? node.x : null,
+      y: Number.isFinite(node.y) ? node.y : null,
+    }));
+
+  if (cleaned.length === 0) cleaned.push(...fallback.nodes);
+  if (!cleaned.some(node => node.parent_id === null)) cleaned[0].parent_id = null;
+
+  const selected = cleaned.find(node => node.id === raw?.selected_node_id)?.id
+    ?? cleaned.find(node => node.parent_id === null)?.id
+    ?? cleaned[0].id;
+
+  return {
+    id,
+    title: String(raw?.title || fallback.title).slice(0, 80),
+    created_at: raw?.created_at || fallback.created_at,
+    updated_at: raw?.updated_at || fallback.updated_at,
+    selected_node_id: selected,
+    nodes: cleaned,
+  };
+}
+
+function getMindMapNodes() {
+  return state.mindMap?.nodes ?? [];
+}
+
+function getMindMapNode(id) {
+  return getMindMapNodes().find(node => node.id === id) ?? null;
+}
+
+function getMindMapChildren(parentId) {
+  return getMindMapNodes()
+    .filter(node => (node.parent_id ?? null) === (parentId ?? null))
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || a.title.localeCompare(b.title));
+}
+
+function nextMindMapOrder(parentId) {
+  const children = getMindMapChildren(parentId);
+  return children.length ? Math.max(...children.map(node => node.order ?? 0)) + 1000 : 1000;
+}
+
+function serializeMindMap() {
+  const map = state.mindMap;
+  if (!map) return null;
+  return {
+    id: map.id,
+    title: map.title || "新しいマインドマップ",
+    created_at: map.created_at,
+    updated_at: map.updated_at,
+    selected_node_id: state.mindMapSelectedId,
+    nodes: getMindMapNodes().map(node => ({
+      id: node.id,
+      parent_id: node.parent_id ?? null,
+      title: node.title || "トピック",
+      order: node.order ?? 0,
+      x: Number.isFinite(node.x) ? node.x : null,
+      y: Number.isFinite(node.y) ? node.y : null,
+    })),
+  };
+}
+
+async function loadMindMap() {
+  if (state.mindMapLoaded) return;
+  els.mindMapStatus.textContent = "読み込み中...";
+  const snap = await mindMapsCollection().get();
+  if (snap.empty) {
+    state.mindMap = createDefaultMindMap();
+    state.mindMapSelectedId = state.mindMap.selected_node_id;
+    await mindMapsCollection().doc(state.mindMap.id).set(serializeMindMap());
+    state.mindMapList = [{ id: state.mindMap.id, title: state.mindMap.title, updated_at: state.mindMap.updated_at }];
+  } else {
+    const docs = snap.docs
+      .map(doc => ({ id: doc.id, data: doc.data() }))
+      .sort((a, b) => String(b.data.updated_at ?? "").localeCompare(String(a.data.updated_at ?? "")));
+    state.mindMap = normalizeMindMap(docs[0].data, docs[0].id);
+    state.mindMapSelectedId = state.mindMap.selected_node_id;
+    state.mindMapList = docs.map(({ id, data }) => ({
+      id,
+      title: String(data.title || "新しいマインドマップ").slice(0, 80),
+      updated_at: data.updated_at || "",
+    }));
+  }
+  state.mindMapLoaded = true;
+  els.mindMapStatus.textContent = `保存済み ${state.mindMap.updated_at}`;
+}
+
+function scheduleMindMapSave() {
+  if (!state.mindMap || !state.uid) return;
+  clearTimeout(state.mindMapSaveTimer);
+  els.mindMapStatus.textContent = "保存中...";
+  state.mindMapSaveTimer = setTimeout(saveMindMapNow, 500);
+}
+
+async function saveMindMapNow() {
+  if (!state.mindMap || !state.uid) return;
+  clearTimeout(state.mindMapSaveTimer);
+  state.mindMap.updated_at = nowIso();
+  state.mindMap.selected_node_id = state.mindMapSelectedId;
+  const listEntry = state.mindMapList.find(m => m.id === state.mindMap.id);
+  if (listEntry) {
+    listEntry.title = state.mindMap.title;
+    listEntry.updated_at = state.mindMap.updated_at;
+  }
+  try {
+    await mindMapsCollection().doc(state.mindMap.id).set(serializeMindMap(), { merge: true });
+    els.mindMapStatus.textContent = `保存済み ${state.mindMap.updated_at}`;
+  } catch (e) {
+    els.mindMapStatus.textContent = "保存できませんでした";
+    showToast(e.message);
+  }
+}
+
+function calculateMindMapLayout() {
+  const nodes = getMindMapNodes();
+  const layout = new Map();
+  const root = nodes.find(node => node.parent_id === null) ?? nodes[0];
+  if (!root) return layout;
+
+  let cursor = 0;
+  function place(node, depth) {
+    const children = getMindMapChildren(node.id);
+    if (children.length === 0) {
+      layout.set(node.id, { x: depth * MINDMAP_X_GAP, y: cursor * MINDMAP_Y_GAP });
+      cursor += 1;
+      return;
+    }
+
+    children.forEach(child => place(child, depth + 1));
+    const childYs = children.map(child => layout.get(child.id)?.y ?? 0);
+    const y = (Math.min(...childYs) + Math.max(...childYs)) / 2;
+    layout.set(node.id, { x: depth * MINDMAP_X_GAP, y });
+  }
+
+  place(root, 0);
+  const rootPos = layout.get(root.id) ?? { x: 0, y: 0 };
+  const offsetX = MINDMAP_CENTER_X - rootPos.x;
+  const offsetY = MINDMAP_CENTER_Y - rootPos.y;
+
+  for (const [id, pos] of layout.entries()) {
+    layout.set(id, { x: pos.x + offsetX, y: pos.y + offsetY });
+  }
+
+  for (const node of nodes) {
+    if (Number.isFinite(node.x) && Number.isFinite(node.y)) {
+      layout.set(node.id, { x: node.x, y: node.y });
+    }
+  }
+
+  return layout;
+}
+
+function applyMindMapTransform() {
+  els.mindMapScene.style.transform =
+    `translate(${state.mindMapPanX}px, ${state.mindMapPanY}px) scale(${state.mindMapZoom})`;
+  els.mindMapZoomLabel.textContent = `${Math.round(state.mindMapZoom * 100)}%`;
+}
+
+function centerMindMap() {
+  const rect = els.mindMapCanvas.getBoundingClientRect();
+  if (!rect.width || !rect.height) return;
+  state.mindMapPanX = rect.width / 2 - MINDMAP_CENTER_X * state.mindMapZoom;
+  state.mindMapPanY = rect.height / 2 - MINDMAP_CENTER_Y * state.mindMapZoom;
+  state.mindMapCentered = true;
+  applyMindMapTransform();
+}
+
+function setMindMapZoom(nextZoom, origin = null) {
+  const oldZoom = state.mindMapZoom;
+  const next = Math.max(0.45, Math.min(1.7, nextZoom));
+  if (next === oldZoom) return;
+
+  const rect = els.mindMapCanvas.getBoundingClientRect();
+  const ox = origin?.x ?? rect.width / 2;
+  const oy = origin?.y ?? rect.height / 2;
+  const sceneX = (ox - state.mindMapPanX) / oldZoom;
+  const sceneY = (oy - state.mindMapPanY) / oldZoom;
+  state.mindMapZoom = next;
+  state.mindMapPanX = ox - sceneX * next;
+  state.mindMapPanY = oy - sceneY * next;
+  applyMindMapTransform();
+}
+
+function setMindMapLinkPath(path, fromPos, toPos) {
+  const startX = fromPos.x + MINDMAP_NODE_HALF_W;
+  const endX = toPos.x - MINDMAP_NODE_HALF_W;
+  const mid = Math.max(60, (endX - startX) * 0.5);
+  path.setAttribute("d", `M ${startX} ${fromPos.y} C ${startX + mid} ${fromPos.y}, ${endX - mid} ${toPos.y}, ${endX} ${toPos.y}`);
+}
+
+function updateMindMapLinksFor(nodeId, layout) {
+  const pos = layout.get(nodeId);
+  if (!pos) return;
+  const node = getMindMapNode(nodeId);
+  if (!node) return;
+
+  if (node.parent_id) {
+    const parentPos = layout.get(node.parent_id);
+    const path = els.mindMapLinks.querySelector(`path[data-child="${nodeId}"]`);
+    if (parentPos && path) setMindMapLinkPath(path, parentPos, pos);
+  }
+
+  for (const child of getMindMapChildren(nodeId)) {
+    const childPos = layout.get(child.id);
+    const path = els.mindMapLinks.querySelector(`path[data-child="${child.id}"]`);
+    if (childPos && path) setMindMapLinkPath(path, pos, childPos);
+  }
+}
+
+function renderMindMap() {
+  if (!state.mindMap) return;
+  const layout = calculateMindMapLayout();
+  const selected = getMindMapNode(state.mindMapSelectedId)
+    ?? getMindMapNodes().find(node => node.parent_id === null)
+    ?? getMindMapNodes()[0]
+    ?? null;
+  state.mindMapSelectedId = selected?.id ?? null;
+  state.mindMap.selected_node_id = state.mindMapSelectedId;
+
+  els.mindMapTitleInput.value = state.mindMap.title || "";
+  els.mindMapNodeTitleInput.value = selected?.title ?? "";
+  els.mindMapNodeTitleInput.disabled = !selected;
+  els.mindMapAddChildBtn.disabled = !selected;
+  els.mindMapAddSiblingBtn.disabled = !selected || selected.parent_id === null;
+  els.mindMapDeleteNodeBtn.disabled = !selected || selected.parent_id === null;
+
+  els.mindMapLinks.innerHTML = "";
+  els.mindMapNodes.innerHTML = "";
+
+  for (const node of getMindMapNodes()) {
+    const pos = layout.get(node.id);
+    if (!pos) continue;
+    const parent = node.parent_id ? getMindMapNode(node.parent_id) : null;
+    const parentPos = parent ? layout.get(parent.id) : null;
+    if (parent && parentPos) {
+      const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      path.setAttribute("class", "mindmap-link");
+      path.dataset.child = node.id;
+      setMindMapLinkPath(path, parentPos, pos);
+      els.mindMapLinks.appendChild(path);
+    }
+
+    const nodeBtn = document.createElement("button");
+    nodeBtn.type = "button";
+    nodeBtn.className = `mindmap-node${node.parent_id === null ? " is-root" : ""}${node.id === state.mindMapSelectedId ? " is-selected" : ""}`;
+    nodeBtn.dataset.id = node.id;
+    nodeBtn.style.left = `${pos.x}px`;
+    nodeBtn.style.top = `${pos.y}px`;
+    nodeBtn.textContent = node.title || "トピック";
+    nodeBtn.addEventListener("click", e => {
+      e.stopPropagation();
+      selectMindMapNode(node.id);
+    });
+    nodeBtn.addEventListener("dblclick", e => {
+      e.stopPropagation();
+      startMindMapNodeEdit(node.id);
+    });
+    nodeBtn.addEventListener("keydown", e => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        startMindMapNodeEdit(node.id);
+      }
+      if (e.key === "Delete" || e.key === "Backspace") {
+        e.preventDefault();
+        deleteSelectedMindMapNode();
+      }
+    });
+    nodeBtn.addEventListener("pointerdown", e => {
+      if (e.button !== 0) return;
+      e.stopPropagation();
+      nodeBtn.setPointerCapture(e.pointerId);
+      const start = layout.get(node.id) ?? { x: 0, y: 0 };
+      state.mindMapNodeDrag = {
+        id: node.id,
+        pointerId: e.pointerId,
+        startClientX: e.clientX,
+        startClientY: e.clientY,
+        startX: start.x,
+        startY: start.y,
+        moved: false,
+      };
+    });
+    nodeBtn.addEventListener("pointermove", e => {
+      const drag = state.mindMapNodeDrag;
+      if (!drag || drag.id !== node.id || drag.pointerId !== e.pointerId) return;
+      const dx = (e.clientX - drag.startClientX) / state.mindMapZoom;
+      const dy = (e.clientY - drag.startClientY) / state.mindMapZoom;
+      if (!drag.moved) {
+        if (Math.hypot(e.clientX - drag.startClientX, e.clientY - drag.startClientY) < 3) return;
+        drag.moved = true;
+        nodeBtn.classList.add("is-dragging");
+      }
+      const x = drag.startX + dx;
+      const y = drag.startY + dy;
+      layout.set(node.id, { x, y });
+      nodeBtn.style.left = `${x}px`;
+      nodeBtn.style.top = `${y}px`;
+      updateMindMapLinksFor(node.id, layout);
+    });
+    nodeBtn.addEventListener("pointerup", e => {
+      const drag = state.mindMapNodeDrag;
+      if (!drag || drag.id !== node.id || drag.pointerId !== e.pointerId) return;
+      nodeBtn.releasePointerCapture(e.pointerId);
+      state.mindMapNodeDrag = null;
+      nodeBtn.classList.remove("is-dragging");
+      if (drag.moved) {
+        const finalPos = layout.get(node.id);
+        node.x = finalPos.x;
+        node.y = finalPos.y;
+        scheduleMindMapSave();
+      }
+    });
+    nodeBtn.addEventListener("pointercancel", e => {
+      const drag = state.mindMapNodeDrag;
+      if (!drag || drag.id !== node.id) return;
+      nodeBtn.releasePointerCapture(e.pointerId);
+      state.mindMapNodeDrag = null;
+      nodeBtn.classList.remove("is-dragging");
+      if (drag.moved) renderMindMap();
+    });
+    els.mindMapNodes.appendChild(nodeBtn);
+  }
+
+  applyMindMapTransform();
+}
+
+function selectMindMapNode(id) {
+  if (!getMindMapNode(id)) return;
+  state.mindMapSelectedId = id;
+  renderMindMap();
+  scheduleMindMapSave();
+}
+
+function startMindMapNodeEdit(nodeId) {
+  const node = getMindMapNode(nodeId);
+  if (!node) return;
+  if (state.mindMapSelectedId !== nodeId) {
+    state.mindMapSelectedId = nodeId;
+    renderMindMap();
+  }
+  const nodeBtn = els.mindMapNodes.querySelector(`[data-id="${nodeId}"]`);
+  if (!nodeBtn || nodeBtn.classList.contains("is-editing")) return;
+
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = `mindmap-node-edit${node.parent_id === null ? " is-root" : ""}`;
+  input.maxLength = 80;
+  input.value = node.title || "";
+  input.style.left = nodeBtn.style.left;
+  input.style.top = nodeBtn.style.top;
+
+  let finished = false;
+  const finish = commit => {
+    if (finished) return;
+    finished = true;
+    if (commit) {
+      node.title = (input.value.trim() || "トピック").slice(0, 80);
+      nodeBtn.textContent = node.title;
+      if (state.mindMapSelectedId === nodeId) {
+        els.mindMapNodeTitleInput.value = node.title;
+      }
+      scheduleMindMapSave();
+    }
+    nodeBtn.classList.remove("is-editing");
+    input.remove();
+  };
+  input.addEventListener("blur", () => finish(true));
+  input.addEventListener("keydown", e => {
+    e.stopPropagation();
+    if (e.key === "Enter") {
+      e.preventDefault();
+      finish(true);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      finish(false);
+    }
+  });
+  input.addEventListener("pointerdown", e => e.stopPropagation());
+
+  nodeBtn.classList.add("is-editing");
+  els.mindMapNodes.appendChild(input);
+  input.focus();
+  input.select();
+}
+
+function addMindMapNode(parentId) {
+  const parent = getMindMapNode(parentId);
+  if (!parent) return;
+  const node = {
+    id: makeId(),
+    parent_id: parent.id,
+    title: "新しいトピック",
+    order: nextMindMapOrder(parent.id),
+    x: null,
+    y: null,
+  };
+  state.mindMap.nodes.push(node);
+  state.mindMapSelectedId = node.id;
+  renderMindMap();
+  scheduleMindMapSave();
+  requestAnimationFrame(() => startMindMapNodeEdit(node.id));
+}
+
+function addMindMapSibling() {
+  const selected = getMindMapNode(state.mindMapSelectedId);
+  if (!selected || selected.parent_id === null) {
+    showToast("中心テーマには同階層を追加できません。");
+    return;
+  }
+  const node = {
+    id: makeId(),
+    parent_id: selected.parent_id,
+    title: "新しいトピック",
+    order: nextMindMapOrder(selected.parent_id),
+    x: null,
+    y: null,
+  };
+  state.mindMap.nodes.push(node);
+  state.mindMapSelectedId = node.id;
+  renderMindMap();
+  scheduleMindMapSave();
+  requestAnimationFrame(() => startMindMapNodeEdit(node.id));
+}
+
+function collectMindMapSubtreeIds(nodeId) {
+  const ids = new Set([nodeId]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const node of getMindMapNodes()) {
+      if (ids.has(node.parent_id) && !ids.has(node.id)) {
+        ids.add(node.id);
+        changed = true;
+      }
+    }
+  }
+  return ids;
+}
+
+async function deleteSelectedMindMapNode() {
+  const selected = getMindMapNode(state.mindMapSelectedId);
+  if (!selected) return;
+  if (selected.parent_id === null) {
+    showToast("中心テーマは削除できません。");
+    return;
+  }
+  const ok = await showConfirm(`「${selected.title}」と子ノードを削除しますか？`);
+  if (!ok) return;
+  const ids = collectMindMapSubtreeIds(selected.id);
+  state.mindMap.nodes = getMindMapNodes().filter(node => !ids.has(node.id));
+  state.mindMapSelectedId = selected.parent_id;
+  renderMindMap();
+  scheduleMindMapSave();
+  showToast("ノードを削除しました。");
+}
+
+function formatMindMapListDate(iso) {
+  const m = String(iso || "").match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+  return m ? `${m[1]}/${m[2]}/${m[3]} ${m[4]}:${m[5]}` : "";
+}
+
+async function createNewMindMap() {
+  if (state.mindMap) await saveMindMapNow();
+  const map = createDefaultMindMap();
+  const previous = state.mindMap;
+  state.mindMap = map;
+  state.mindMapSelectedId = map.selected_node_id;
+  try {
+    await mindMapsCollection().doc(map.id).set(serializeMindMap());
+  } catch (e) {
+    state.mindMap = previous;
+    state.mindMapSelectedId = previous?.selected_node_id ?? null;
+    showToast(e.message);
+    return;
+  }
+  state.mindMapCentered = false;
+  state.mindMapList.unshift({ id: map.id, title: map.title, updated_at: map.updated_at });
+  closeMindMapListPanel();
+  renderMindMap();
+  centerMindMap();
+  els.mindMapStatus.textContent = `保存済み ${map.updated_at}`;
+  els.mindMapTitleInput.focus();
+  els.mindMapTitleInput.select();
+  showToast("新しいマインドマップを作成しました。");
+}
+
+async function switchMindMap(id) {
+  if (!state.mindMap || state.mindMap.id === id) {
+    closeMindMapListPanel();
+    return;
+  }
+  await saveMindMapNow();
+  els.mindMapStatus.textContent = "読み込み中...";
+  try {
+    const doc = await mindMapsCollection().doc(id).get();
+    if (!doc.exists) {
+      state.mindMapList = state.mindMapList.filter(m => m.id !== id);
+      renderMindMapList();
+      showToast("マインドマップが見つかりませんでした。");
+      return;
+    }
+    state.mindMap = normalizeMindMap(doc.data(), doc.id);
+    state.mindMapSelectedId = state.mindMap.selected_node_id;
+    state.mindMapCentered = false;
+    renderMindMap();
+    centerMindMap();
+    els.mindMapStatus.textContent = `保存済み ${state.mindMap.updated_at}`;
+  } catch (e) {
+    showToast(e.message);
+  }
+  closeMindMapListPanel();
+}
+
+async function deleteMindMap(id) {
+  if (state.mindMapList.length <= 1) return;
+  const target = state.mindMapList.find(m => m.id === id);
+  const ok = await showConfirm(`「${target?.title || "新しいマインドマップ"}」を削除しますか？`, "削除");
+  if (!ok) return;
+  try {
+    await mindMapsCollection().doc(id).delete();
+  } catch (e) {
+    showToast(e.message);
+    return;
+  }
+  state.mindMapList = state.mindMapList.filter(m => m.id !== id);
+  if (state.mindMap?.id === id) {
+    clearTimeout(state.mindMapSaveTimer);
+    const next = state.mindMapList[0];
+    try {
+      const doc = await mindMapsCollection().doc(next.id).get();
+      state.mindMap = normalizeMindMap(doc.data(), doc.id);
+    } catch {
+      state.mindMap = createDefaultMindMap(next.id);
+    }
+    state.mindMapSelectedId = state.mindMap.selected_node_id;
+    state.mindMapCentered = false;
+    renderMindMap();
+    centerMindMap();
+    els.mindMapStatus.textContent = `保存済み ${state.mindMap.updated_at}`;
+  }
+  renderMindMapList();
+  showToast("マインドマップを削除しました。");
+}
+
+function startMindMapListRename(id) {
+  const item = els.mindMapListItems.querySelector(`[data-id="${id}"]`);
+  const entry = state.mindMapList.find(m => m.id === id);
+  if (!item || !entry || item.classList.contains("is-editing")) return;
+  const openBtn = item.querySelector(".mindmap-list-open");
+
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "mindmap-list-rename";
+  input.maxLength = 80;
+  input.value = entry.title;
+
+  let finished = false;
+  const finish = commit => {
+    if (finished) return;
+    finished = true;
+    if (commit) {
+      const title = (input.value.trim() || "新しいマインドマップ").slice(0, 80);
+      entry.title = title;
+      entry.updated_at = nowIso();
+      const titleEl = openBtn.querySelector(".mindmap-list-title");
+      if (titleEl) titleEl.textContent = title;
+      const dateEl = openBtn.querySelector(".mindmap-list-date");
+      if (dateEl) dateEl.textContent = formatMindMapListDate(entry.updated_at);
+      if (state.mindMap?.id === id) {
+        state.mindMap.title = title;
+        els.mindMapTitleInput.value = title;
+      }
+      mindMapsCollection().doc(id).update({ title, updated_at: entry.updated_at }).catch(e => showToast(e.message));
+    }
+    item.classList.remove("is-editing");
+    input.remove();
+    openBtn.hidden = false;
+  };
+  input.addEventListener("blur", () => finish(true));
+  input.addEventListener("keydown", e => {
+    e.stopPropagation();
+    if (e.key === "Enter") {
+      e.preventDefault();
+      finish(true);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      finish(false);
+    }
+  });
+
+  item.classList.add("is-editing");
+  openBtn.hidden = true;
+  openBtn.insertAdjacentElement("afterend", input);
+  input.focus();
+  input.select();
+}
+
+function renderMindMapList() {
+  els.mindMapListItems.innerHTML = "";
+  state.mindMapList.forEach(entry => {
+    const item = document.createElement("li");
+    item.className = `mindmap-list-item${entry.id === state.mindMap?.id ? " is-active" : ""}`;
+    item.dataset.id = entry.id;
+
+    const openBtn = document.createElement("button");
+    openBtn.type = "button";
+    openBtn.className = "mindmap-list-open";
+    openBtn.dataset.action = "switch";
+
+    const title = document.createElement("span");
+    title.className = "mindmap-list-title";
+    title.textContent = entry.title || "新しいマインドマップ";
+    openBtn.appendChild(title);
+
+    const date = document.createElement("span");
+    date.className = "mindmap-list-date";
+    date.textContent = formatMindMapListDate(entry.updated_at);
+    openBtn.appendChild(date);
+
+    item.appendChild(openBtn);
+
+    const actions = document.createElement("div");
+    actions.className = "mindmap-list-actions";
+
+    const renameBtn = document.createElement("button");
+    renameBtn.type = "button";
+    renameBtn.className = "mindmap-list-icon-btn";
+    renameBtn.dataset.action = "rename";
+    renameBtn.title = "名前を変更";
+    renameBtn.setAttribute("aria-label", "名前を変更");
+    renameBtn.textContent = "✏️";
+    actions.appendChild(renameBtn);
+
+    const deleteBtn = document.createElement("button");
+    deleteBtn.type = "button";
+    deleteBtn.className = "mindmap-list-icon-btn danger";
+    deleteBtn.dataset.action = "delete";
+    deleteBtn.title = "削除";
+    deleteBtn.setAttribute("aria-label", "削除");
+    deleteBtn.textContent = "🗑";
+    deleteBtn.disabled = state.mindMapList.length <= 1;
+    actions.appendChild(deleteBtn);
+
+    item.appendChild(actions);
+    els.mindMapListItems.appendChild(item);
+  });
+}
+
+function openMindMapListPanel() {
+  renderMindMapList();
+  const rect = els.mindMapListBtn.getBoundingClientRect();
+  els.mindMapListPanel.style.top = `${rect.bottom + 6}px`;
+  els.mindMapListPanel.style.left = `${rect.left}px`;
+  els.mindMapListPanel.style.right = "auto";
+  els.mindMapListPanel.hidden = false;
+  els.mindMapListBtn.setAttribute("aria-expanded", "true");
+}
+
+function closeMindMapListPanel() {
+  els.mindMapListPanel.hidden = true;
+  els.mindMapListBtn.setAttribute("aria-expanded", "false");
+}
+
+async function openMindMapPanel() {
+  closeMobileMenu();
+  closeTemplatesPanel();
+  hideCtxMenu();
+  hideMediaCtxMenu();
+  els.accountMenu.hidden = true;
+  els.appShell.hidden = true;
+  els.mindMapOverlay.hidden = false;
+  try {
+    await loadMindMap();
+    renderMindMap();
+    requestAnimationFrame(() => {
+      if (!state.mindMapCentered) centerMindMap();
+      else applyMindMapTransform();
+    });
+  } catch (e) {
+    showToast(e.message);
+  }
+}
+
+function closeMindMapPanel() {
+  if (els.mindMapOverlay.hidden) return;
+  els.mindMapOverlay.hidden = true;
+  els.appShell.hidden = false;
+  closeMindMapListPanel();
+  if (state.mindMap) saveMindMapNow();
+}
+
+function updateSelectedMindMapTitle(value) {
+  const selected = getMindMapNode(state.mindMapSelectedId);
+  if (!selected) return;
+  selected.title = String(value ?? "").slice(0, 80);
+  const nodeEl = els.mindMapNodes.querySelector(`[data-id="${selected.id}"]`);
+  if (nodeEl) nodeEl.textContent = selected.title || "トピック";
+  scheduleMindMapSave();
+}
+
+els.mindMapBtn.addEventListener("click", openMindMapPanel);
+els.mindMapClose.addEventListener("click", closeMindMapPanel);
+els.mindMapTitleInput.addEventListener("input", () => {
+  if (!state.mindMap) return;
+  state.mindMap.title = (els.mindMapTitleInput.value || "新しいマインドマップ").slice(0, 80);
+  scheduleMindMapSave();
+});
+els.mindMapTitleInput.addEventListener("blur", () => {
+  if (!state.mindMap) return;
+  state.mindMap.title = (els.mindMapTitleInput.value.trim() || "新しいマインドマップ").slice(0, 80);
+  els.mindMapTitleInput.value = state.mindMap.title;
+  scheduleMindMapSave();
+});
+els.mindMapNodeTitleInput.addEventListener("input", () => updateSelectedMindMapTitle(els.mindMapNodeTitleInput.value));
+els.mindMapNodeTitleInput.addEventListener("blur", () => {
+  const selected = getMindMapNode(state.mindMapSelectedId);
+  if (!selected) return;
+  selected.title = (els.mindMapNodeTitleInput.value.trim() || "トピック").slice(0, 80);
+  els.mindMapNodeTitleInput.value = selected.title;
+  renderMindMap();
+  scheduleMindMapSave();
+});
+els.mindMapNodeTitleInput.addEventListener("keydown", e => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    els.mindMapNodeTitleInput.blur();
+  }
+});
+els.mindMapAddChildBtn.addEventListener("click", () => addMindMapNode(state.mindMapSelectedId));
+els.mindMapAddSiblingBtn.addEventListener("click", addMindMapSibling);
+els.mindMapDeleteNodeBtn.addEventListener("click", deleteSelectedMindMapNode);
+els.mindMapNewBtn.addEventListener("click", createNewMindMap);
+els.mindMapListBtn.addEventListener("click", () => {
+  if (els.mindMapListPanel.hidden) openMindMapListPanel();
+  else closeMindMapListPanel();
+});
+els.mindMapListItems.addEventListener("click", e => {
+  const item = e.target.closest(".mindmap-list-item");
+  if (!item || item.classList.contains("is-editing")) return;
+  const id = item.dataset.id;
+  const action = e.target.closest("[data-action]")?.dataset.action;
+  if (action === "rename") {
+    e.stopPropagation();
+    startMindMapListRename(id);
+  } else if (action === "delete") {
+    e.stopPropagation();
+    deleteMindMap(id);
+  } else {
+    switchMindMap(id);
+  }
+});
+els.mindMapCenterBtn.addEventListener("click", centerMindMap);
+els.mindMapZoomOutBtn.addEventListener("click", () => setMindMapZoom(state.mindMapZoom - 0.12));
+els.mindMapZoomInBtn.addEventListener("click", () => setMindMapZoom(state.mindMapZoom + 0.12));
+els.mindMapCanvas.addEventListener("wheel", e => {
+  e.preventDefault();
+  const rect = els.mindMapCanvas.getBoundingClientRect();
+  setMindMapZoom(
+    state.mindMapZoom + (e.deltaY < 0 ? 0.08 : -0.08),
+    { x: e.clientX - rect.left, y: e.clientY - rect.top },
+  );
+}, { passive: false });
+els.mindMapCanvas.addEventListener("pointerdown", e => {
+  if (e.target.closest(".mindmap-node, .mindmap-node-edit")) return;
+  els.mindMapCanvas.setPointerCapture(e.pointerId);
+  state.mindMapPanning = {
+    pointerId: e.pointerId,
+    startX: e.clientX,
+    startY: e.clientY,
+    panX: state.mindMapPanX,
+    panY: state.mindMapPanY,
+  };
+  els.mindMapCanvas.classList.add("is-panning");
+});
+els.mindMapCanvas.addEventListener("pointermove", e => {
+  const pan = state.mindMapPanning;
+  if (!pan || pan.pointerId !== e.pointerId) return;
+  state.mindMapPanX = pan.panX + e.clientX - pan.startX;
+  state.mindMapPanY = pan.panY + e.clientY - pan.startY;
+  applyMindMapTransform();
+});
+function finishMindMapPan(e) {
+  if (!state.mindMapPanning || state.mindMapPanning.pointerId !== e.pointerId) return;
+  state.mindMapPanning = null;
+  els.mindMapCanvas.classList.remove("is-panning");
+}
+els.mindMapCanvas.addEventListener("pointerup", finishMindMapPan);
+els.mindMapCanvas.addEventListener("pointercancel", finishMindMapPan);
+window.addEventListener("resize", () => {
+  if (!els.mindMapOverlay.hidden && !state.mindMapCentered) centerMindMap();
+});
+
+function resetMindMapState() {
+  clearTimeout(state.mindMapSaveTimer);
+  state.mindMap = null;
+  state.mindMapList = [];
+  state.mindMapLoaded = false;
+  state.mindMapSelectedId = null;
+  state.mindMapSaveTimer = null;
+  state.mindMapZoom = 1;
+  state.mindMapPanX = 0;
+  state.mindMapPanY = 0;
+  state.mindMapCentered = false;
+  state.mindMapPanning = null;
+  state.mindMapNodeDrag = null;
+  els.mindMapOverlay.hidden = true;
+  els.mindMapListPanel.hidden = true;
+  els.mindMapLinks.innerHTML = "";
+  els.mindMapNodes.innerHTML = "";
+}
+
 // ── Media ─────────────────────────────────────────────────────────────────────
 
 async function uploadMedia(noteId, files) {
@@ -2717,6 +3602,9 @@ document.addEventListener("click", e => {
   if (!els.accountMenu.hidden && !els.accountMenu.contains(e.target) && !els.accountBtn.contains(e.target)) {
     els.accountMenu.hidden = true;
   }
+  if (!els.mindMapListPanel.hidden && !els.mindMapListPanel.contains(e.target) && !els.mindMapListBtn.contains(e.target)) {
+    closeMindMapListPanel();
+  }
 });
 
 document.addEventListener("keydown", e => {
@@ -2724,6 +3612,7 @@ document.addEventListener("keydown", e => {
     closeLightbox();
     closeCropModal();
     closeTemplatesPanel();
+    closeMindMapPanel();
     hideCtxMenu();
     hideMediaCtxMenu();
     els.accountMenu.hidden = true;
@@ -3052,6 +3941,7 @@ async function handleResendVerification() {
     await user.reload();
     if (user.emailVerified) {
       updateAccountUI(user);
+      if (state.uid !== user.uid) resetMindMapState();
       state.uid = user.uid;
       showApp();
       try {
@@ -3130,6 +4020,10 @@ async function handleDeleteAccount(e) {
     await deleteCollectionInBatches(userRef.collection("templates"));
     console.log("[deleteAccount] templates deleted");
 
+    console.log("[deleteAccount] deleting users/{uid}/mindmaps ...");
+    await deleteCollectionInBatches(userRef.collection("mindmaps"));
+    console.log("[deleteAccount] mindmaps deleted");
+
     console.log("[deleteAccount] deleting users/{uid} document ...");
     await userRef.delete().catch(err => console.warn("[deleteAccount] users/{uid} doc delete error:", err));
     console.log("[deleteAccount] user document deleted");
@@ -3139,6 +4033,7 @@ async function handleDeleteAccount(e) {
     console.log("[deleteAccount] auth user deleted");
 
     state.uid = null;
+    resetMindMapState();
     showAuthScreen();
     showToast("アカウントを削除しました。");
   } catch (err) {
@@ -3287,6 +4182,7 @@ if (!auth) {
       } catch (e) { showToast(e.message); }
     } else {
       state.uid = null;
+      resetMindMapState();
       showAuthScreen();
     }
   });
