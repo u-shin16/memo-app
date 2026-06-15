@@ -15,6 +15,15 @@
   <link rel="apple-touch-icon" sizes="180x180" href="{{ url_for('static', filename='icons/apple-touch-icon.png') }}">
   <link rel="manifest" href="{{ url_for('static', filename='site.webmanifest') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <!-- Google tag (gtag.js) -->
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-921LLN7VCT"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+
+    gtag('config', 'G-921LLN7VCT');
+  </script>
 </head>
 <body>
   <div class="app-shell" hidden>
@@ -285,9 +294,13 @@
           <input id="mindMapTitleInput" class="mindmap-title-input" type="text" maxlength="80" placeholder="マインドマップ名">
         </div>
         <div class="mindmap-head-actions">
+          <button id="mindMapUndoBtn" class="mindmap-tool-btn" type="button" title="一つ前に戻る（Ctrl / ⌘ + Z）" disabled>
+            <span class="btn-icon" aria-hidden="true">↶</span>
+            <span class="btn-label">戻す</span>
+          </button>
           <button id="mindMapNewBtn" class="mindmap-tool-btn" type="button" title="新規マップ">
             <span class="btn-icon" aria-hidden="true">＋</span>
-            <span class="btn-label">新規</span>
+            <span class="btn-label">新規マップ</span>
           </button>
         </div>
       </header>
@@ -297,24 +310,50 @@
         <ul id="mindMapListItems" class="mindmap-list-items"></ul>
       </div>
 
+      <div id="mindMapContextMenu" class="context-menu mindmap-context-menu" hidden>
+        <button class="ctx-item" data-mindmap-action="rename">✏️　名前を変更</button>
+        <button class="ctx-item" data-mindmap-action="add-child">＋　子ノードを追加</button>
+        <button class="ctx-item" data-mindmap-action="toggle-children">▾　子を隠す</button>
+        <button class="ctx-item" data-mindmap-action="align">↕　同階層を整列</button>
+        <button class="ctx-item" data-mindmap-action="undo">↶　戻す</button>
+        <button class="ctx-item" data-mindmap-action="center">◎　中央に戻す</button>
+        <div class="ctx-sep"></div>
+        <div class="mindmap-context-color-panel" aria-label="色を変更">
+          <p class="mindmap-context-color-title">色を変更</p>
+          <div class="mindmap-context-color-row">
+            <span class="mindmap-context-color-label">塗り</span>
+            <div class="mindmap-context-color-palette" data-mindmap-context-color-palette="fill_color"></div>
+          </div>
+          <div class="mindmap-context-color-row">
+            <span class="mindmap-context-color-label">枠</span>
+            <div class="mindmap-context-color-palette" data-mindmap-context-color-palette="border_color"></div>
+          </div>
+          <div class="mindmap-context-color-row">
+            <span class="mindmap-context-color-label">線</span>
+            <div class="mindmap-context-color-palette" data-mindmap-context-color-palette="link_color"></div>
+          </div>
+        </div>
+        <div class="ctx-sep"></div>
+        <button class="ctx-item ctx-danger" data-mindmap-action="delete">🗑　削除</button>
+      </div>
+
+      <div id="mindMapLinkContextMenu" class="context-menu mindmap-context-menu mindmap-link-context-menu" hidden>
+        <div class="mindmap-context-color-panel" aria-label="線の色を変更">
+          <p class="mindmap-context-color-title">線の色</p>
+          <div class="mindmap-context-color-palette is-link-only" id="mindMapLinkContextPalette"></div>
+        </div>
+      </div>
+
       <div class="mindmap-body">
         <aside class="mindmap-tools">
-          <div class="mindmap-tool-grid">
-            <button id="mindMapAddChildBtn" class="mindmap-tool-btn" type="button" title="選択ノードに子ノードを追加">
+          <div class="mindmap-sidebar-actions">
+            <button id="mindMapSideNewBtn" class="icon-btn" type="button" title="新規マップ" aria-label="新規マップ">
               <span class="btn-icon" aria-hidden="true">＋</span>
-              <span class="btn-label">子ノード</span>
+              <span class="btn-label">新規マップ</span>
             </button>
-            <button id="mindMapAddSiblingBtn" class="mindmap-tool-btn" type="button" title="選択ノードと同じ階層に追加">
-              <span class="btn-icon" aria-hidden="true">↳</span>
-              <span class="btn-label">同階層</span>
-            </button>
-            <button id="mindMapDeleteNodeBtn" class="mindmap-tool-btn danger" type="button" title="選択ノードを削除">
-              <span class="btn-icon" aria-hidden="true">🗑</span>
-              <span class="btn-label">削除</span>
-            </button>
-            <button id="mindMapCenterBtn" class="mindmap-tool-btn" type="button" title="中央に戻す">
-              <span class="btn-icon" aria-hidden="true">◎</span>
-              <span class="btn-label">中央</span>
+            <button id="mindMapAccountBtn" class="icon-btn" type="button" title="アカウントメニューを開く" aria-label="アカウントメニューを開く">
+              <span class="btn-icon" aria-hidden="true">👤</span>
+              <span class="btn-label">アカウント</span>
             </button>
           </div>
 
@@ -322,6 +361,45 @@
             <span>選択ノード</span>
             <input id="mindMapNodeTitleInput" type="text" maxlength="80" placeholder="ノード名">
           </label>
+
+          <div class="mindmap-color-panel" aria-label="色設定">
+            <span class="mindmap-section-label">色</span>
+            <div class="mindmap-color-rows">
+              <div class="mindmap-color-row">
+                <div id="mindMapNodeFillColorButton" class="mindmap-color-current" role="group" aria-label="塗り色を選ぶ">
+                  <button class="mindmap-color-current-trigger" type="button" aria-expanded="false" aria-controls="mindMapNodeFillPalette">
+                    <span class="mindmap-color-current-swatch" aria-hidden="true"></span>
+                    <span class="mindmap-color-current-label">塗り</span>
+                    <span class="mindmap-color-current-caret" aria-hidden="true">▾</span>
+                  </button>
+                  <div id="mindMapNodeFillPalette" class="mindmap-color-palette" aria-label="塗り色" hidden></div>
+                </div>
+                <input id="mindMapNodeFillColorInput" class="mindmap-color-input" type="color" value="#ffffff" aria-label="ノードの塗り色">
+              </div>
+              <div class="mindmap-color-row">
+                <div id="mindMapNodeBorderColorButton" class="mindmap-color-current" role="group" aria-label="枠色を選ぶ">
+                  <button class="mindmap-color-current-trigger" type="button" aria-expanded="false" aria-controls="mindMapNodeBorderPalette">
+                    <span class="mindmap-color-current-swatch" aria-hidden="true"></span>
+                    <span class="mindmap-color-current-label">枠</span>
+                    <span class="mindmap-color-current-caret" aria-hidden="true">▾</span>
+                  </button>
+                  <div id="mindMapNodeBorderPalette" class="mindmap-color-palette" aria-label="枠色" hidden></div>
+                </div>
+                <input id="mindMapNodeBorderColorInput" class="mindmap-color-input" type="color" value="#3b82f6" aria-label="ノードの枠色">
+              </div>
+              <div class="mindmap-color-row">
+                <div id="mindMapLinkColorButton" class="mindmap-color-current" role="group" aria-label="線色を選ぶ">
+                  <button class="mindmap-color-current-trigger" type="button" aria-expanded="false" aria-controls="mindMapLinkPalette">
+                    <span class="mindmap-color-current-swatch" aria-hidden="true"></span>
+                    <span class="mindmap-color-current-label">線</span>
+                    <span class="mindmap-color-current-caret" aria-hidden="true">▾</span>
+                  </button>
+                  <div id="mindMapLinkPalette" class="mindmap-color-palette" aria-label="ノード間の線色" hidden></div>
+                </div>
+                <input id="mindMapLinkColorInput" class="mindmap-color-input" type="color" value="#93c5fd" aria-label="ノード間の線色">
+              </div>
+            </div>
+          </div>
 
           <div class="mindmap-zoom-row">
             <button id="mindMapZoomOutBtn" class="mindmap-icon-btn" type="button" title="縮小" aria-label="縮小">－</button>
