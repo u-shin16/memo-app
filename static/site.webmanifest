@@ -1,6 +1,6 @@
 {
-  "name": "StackNote",
-  "short_name": "StackNote",
+  "name": "MusubiMemo",
+  "short_name": "MusubiMemo",
   "description": "アイデアを階層的に整理できるメモ帳アプリです。",
   "start_url": "/",
   "scope": "/",

@@ -3,11 +3,11 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>メール認証｜StackNote</title>
-  <meta name="description" content="StackNoteのメールアドレス確認ページです。">
+  <title>メール認証｜MusubiMemo</title>
+  <meta name="description" content="MusubiMemoのメールアドレス確認ページです。">
   <meta name="theme-color" content="#2563eb">
-  <meta name="application-name" content="StackNote">
-  <meta name="apple-mobile-web-app-title" content="StackNote">
+  <meta name="application-name" content="MusubiMemo">
+  <meta name="apple-mobile-web-app-title" content="MusubiMemo">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
   <link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('static', filename='icons/favicon-32.png') }}">
@@ -19,7 +19,7 @@
 <body>
   <main class="auth-action-page">
     <section class="auth-action-card" aria-live="polite">
-      <p class="auth-action-brand">StackNote</p>
+      <p class="auth-action-brand">MusubiMemo</p>
       <h1 id="actionTitle">メールアドレスの確認</h1>
 
       <div id="actionPending" class="action-state">
@@ -30,15 +30,15 @@
       <div id="actionSuccess" class="action-state" hidden>
         <div class="action-icon success" aria-hidden="true">✓</div>
         <h2>メール認証が完了しました</h2>
-        <p>StackNoteに戻って「認証状況を更新」を押すと、アカウント登録を完了できます。</p>
-        <a class="action-primary action-link" href="/">StackNoteに戻る</a>
+        <p>MusubiMemoに戻って「認証状況を更新」を押すと、アカウント登録を完了できます。</p>
+        <a class="action-primary action-link" href="/">MusubiMemoに戻る</a>
       </div>
 
       <div id="actionError" class="action-state" hidden>
         <div class="action-icon error" aria-hidden="true">!</div>
         <h2>認証できませんでした</h2>
-        <p id="actionErrorMessage">リンクの有効期限が切れているか、すでに使用済みです。StackNoteに戻って確認メールを再送してください。</p>
-        <a class="action-secondary action-link" href="/">StackNoteに戻る</a>
+        <p id="actionErrorMessage">リンクの有効期限が切れているか、すでに使用済みです。MusubiMemoに戻って確認メールを再送してください。</p>
+        <a class="action-secondary action-link" href="/">MusubiMemoに戻る</a>
       </div>
     </section>
   </main>

@@ -2163,8 +2163,9 @@ h1 {
 .mindmap-link {
   fill: none;
   stroke: var(--mindmap-link-color, #93c5fd);
-  stroke-width: 4;
+  stroke-width: 3.25;
   stroke-linecap: round;
+  stroke-linejoin: round;
   pointer-events: none;
 }
 
@@ -2173,6 +2174,7 @@ h1 {
   stroke: transparent;
   stroke-width: 18;
   stroke-linecap: round;
+  stroke-linejoin: round;
   pointer-events: stroke;
   cursor: context-menu;
 }

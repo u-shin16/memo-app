@@ -122,7 +122,7 @@ def main() -> None:
 
     if not notes_file.exists():
         print(f"{notes_file} が見つかりません。")
-        print("本番VPS（stacknote.webtool-labs.com）の data/notes.json・data/templates.json・")
+        print("本番VPS（musubimemo.webtool-labs.com）の data/notes.json・data/templates.json・")
         print(f"data/media/* を {BASE_DIR / 'data'} 以下の同名パスにコピーしてから再実行してください。")
         print("（コピーするだけで、VPS側のファイルは削除しないでください）")
         sys.exit(1)

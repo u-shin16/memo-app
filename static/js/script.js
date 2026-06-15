@@ -2260,9 +2260,25 @@ function setMindMapZoom(nextZoom, origin = null) {
 
 function setMindMapLinkPath(path, fromPos, toPos) {
   const startX = fromPos.x + MINDMAP_NODE_HALF_W;
+  const startY = fromPos.y;
   const endX = toPos.x - MINDMAP_NODE_HALF_W;
-  const mid = Math.max(60, (endX - startX) * 0.5);
-  path.setAttribute("d", `M ${startX} ${fromPos.y} C ${startX + mid} ${fromPos.y}, ${endX - mid} ${toPos.y}, ${endX} ${toPos.y}`);
+  const endY = toPos.y;
+  const gap = endX - startX;
+  const verticalGap = Math.abs(endY - startY);
+
+  if (verticalGap < 1) {
+    path.setAttribute("d", `M ${startX} ${startY} L ${endX} ${endY}`);
+    return;
+  }
+
+  if (gap >= 20) {
+    const curve = Math.max(8, Math.min(72, gap * 0.38));
+    path.setAttribute("d", `M ${startX} ${startY} C ${startX + curve} ${startY}, ${endX - curve} ${endY}, ${endX} ${endY}`);
+    return;
+  }
+
+  const routeX = Math.max(startX, endX) + 42;
+  path.setAttribute("d", `M ${startX} ${startY} C ${routeX} ${startY}, ${routeX} ${endY}, ${endX} ${endY}`);
 }
 
 function updateMindMapLinksFor(nodeId, layout) {

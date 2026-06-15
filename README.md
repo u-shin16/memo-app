@@ -1,4 +1,4 @@
-# StackNote
+# MusubiMemo
 
 階層的にアイデアやプロジェクトを管理できる Flask 製メモ帳アプリです。
 
@@ -85,7 +85,7 @@ http://127.0.0.1:5001
 2. 「プロジェクトの設定」→「全般」→「マイアプリ」で新しいWebアプリを登録する
 3. 表示される `firebaseConfig`（apiKey, authDomain, projectId, storageBucket, messagingSenderId, appId, measurementId）を [`static/js/firebase-config.js`](static/js/firebase-config.js) の `firebaseConfig` に貼り付ける
 4. 「Authentication」→「Sign-in method」で「メール/パスワード」プロバイダを有効にする
-5. 「Authentication」→「Settings」→「Authorized domains」に公開ドメイン（例: `stacknote.webtool-labs.com`）を追加する
+5. 「Authentication」→「Settings」→「Authorized domains」に公開ドメイン（例: `musubimemo.webtool-labs.com`）を追加する
 6. 「Authentication」→「Templates」→「メールアドレスの確認」で、アクションURLを `https://<公開ドメイン>/auth/action` に設定する
 7. 「Firestore Database」を開き、本番モードでデータベースを作成する。「ルール」タブで、このリポジトリの [`firestore.rules`](firestore.rules) の内容を貼り付けてPublishする
 8. 「Storage」を開き、Storageを有効化する（**プロジェクトがSparkプランの場合、Blazeプラン（従量課金）へのアップグレードを求められることがあります**）。「Rules」タブで、このリポジトリの [`storage.rules`](storage.rules) の内容を貼り付けてPublishする
@@ -101,7 +101,7 @@ Firebaseコンソールの「メールアドレスの確認」テンプレート
 件名:
 
 ```text
-StackNote のメールアドレスの確認
+MusubiMemo のメールアドレスの確認
 ```
 
 本文:
@@ -117,7 +117,7 @@ StackNote のメールアドレスの確認
 
 よろしくお願いいたします。
 
-StackNote チーム
+MusubiMemo チーム
 ```
 
 リンクを開いた後の承認画面は `/auth/action` で表示されます。Firebaseコンソール側のアクションURLを設定していない場合、Firebase標準の英語画面が表示されます。
