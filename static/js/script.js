@@ -1,5 +1,7 @@
 // ── State ─────────────────────────────────────────────────────────────────────
 
+const MEMO_DEFAULT_TEXT_COLOR = "#111827";
+
 const state = {
   uid:             null,
   data:            null,
@@ -11,6 +13,7 @@ const state = {
   mindMapSelectedId: null,
   mindMapContextNodeId: null,
   mindMapContextLinkNodeId: null,
+  mindMapListContextMapId: null,
   mindMapUndoStack: [],
   mindMapEditSnapshot: null,
   isApplyingMindMapUndo: false,
@@ -29,6 +32,11 @@ const state = {
   suppressTreeClickUntil: 0,
   mediaCmFigure:   null,
   pendingMediaCaretFigure: null,
+  memoFormatRange: null,
+  memoTextColor:   MEMO_DEFAULT_TEXT_COLOR,
+  memoStrikeActive: false,
+  memoHeadingLevel: "normal",
+  isApplyingMemoFormat: false,
   undoStack:       [],
   isApplyingUndo:  false,
 };
@@ -60,6 +68,7 @@ const els = {
   mindMapListBtn:   document.getElementById("mindMapListBtn"),
   mindMapListPanel: document.getElementById("mindMapListPanel"),
   mindMapListItems: document.getElementById("mindMapListItems"),
+  mindMapListContextMenu: document.getElementById("mindMapListContextMenu"),
   mindMapContextMenu: document.getElementById("mindMapContextMenu"),
   mindMapLinkContextMenu: document.getElementById("mindMapLinkContextMenu"),
   mindMapLinkContextPalette: document.getElementById("mindMapLinkContextPalette"),
@@ -99,7 +108,15 @@ const els = {
   templateSaveBtn:  document.getElementById("templateSaveBtn"),
   undoBtn:          document.getElementById("undoBtn"),
   checkBtn:         document.getElementById("checkBtn"),
+  memoFormatToggleBtn: document.getElementById("memoFormatToggleBtn"),
   noteToMindMapBtn: document.getElementById("noteToMindMapBtn"),
+  memoFormatBar:    document.getElementById("memoFormatBar"),
+  memoTextColorBtn: document.getElementById("memoTextColorBtn"),
+  memoTextColorLabel: document.getElementById("memoTextColorLabel"),
+  memoTextColorPalette: document.getElementById("memoTextColorPalette"),
+  memoStrikeBtn:    document.getElementById("memoStrikeBtn"),
+  memoSubheadingBtn: document.getElementById("memoSubheadingBtn"),
+  memoHeadingBtn:   document.getElementById("memoHeadingBtn"),
   addChildBtn:      document.getElementById("addChildBtn"),
   mediaBtn:         document.getElementById("mediaBtn"),
   mediaInput:       document.getElementById("mediaInput"),
@@ -172,9 +189,7 @@ const db      = (window.FIREBASE_READY && typeof firebase !== "undefined") ? fir
 const storage = (window.FIREBASE_READY && typeof firebase !== "undefined") ? firebase.storage() : null;
 if (auth) auth.languageCode = "ja";
 
-// Firebase Storage は現在Sparkプラン（無料）では利用できないため、
-// Blazeプランへアップグレードするまでメディア機能（画像・動画の添付・トリミング）を無効化する。
-const STORAGE_ENABLED = false;
+const STORAGE_ENABLED = Boolean(storage && window.firebaseConfig?.storageBucket);
 if (!STORAGE_ENABLED) {
   els.mediaBtn.hidden = true;
   if (els.mediaTrimBtn) els.mediaTrimBtn.hidden = true;
@@ -254,6 +269,18 @@ let _confirmResolve = null;
 function showConfirm(message, okLabel = "削除") {
   document.getElementById("confirmMsg").textContent = message;
   document.getElementById("confirmOk").textContent  = okLabel;
+  document.getElementById("confirmExtra").hidden = true;
+  els.confirmOverlay.classList.add("open");
+  requestAnimationFrame(() => document.getElementById("confirmOk").focus());
+  return new Promise(r => { _confirmResolve = r; });
+}
+
+function showReplaceMindMapConfirm(message) {
+  document.getElementById("confirmMsg").textContent = message;
+  document.getElementById("confirmOk").textContent = "置き換え";
+  const extra = document.getElementById("confirmExtra");
+  extra.textContent = "無視して追加";
+  extra.hidden = false;
   els.confirmOverlay.classList.add("open");
   requestAnimationFrame(() => document.getElementById("confirmOk").focus());
   return new Promise(r => { _confirmResolve = r; });
@@ -261,11 +288,13 @@ function showConfirm(message, okLabel = "削除") {
 
 function resolveConfirm(result) {
   els.confirmOverlay.classList.remove("open");
+  document.getElementById("confirmExtra").hidden = true;
   if (_confirmResolve) { const r = _confirmResolve; _confirmResolve = null; r(result); }
 }
 
 (function initConfirmModal() {
   document.getElementById("confirmOk")    .addEventListener("click", () => resolveConfirm(true));
+  document.getElementById("confirmExtra") .addEventListener("click", () => resolveConfirm("add"));
   document.getElementById("confirmCancel").addEventListener("click", () => resolveConfirm(false));
   els.confirmOverlay.addEventListener("click", e => {
     if (e.target === els.confirmOverlay) resolveConfirm(false);
@@ -429,17 +458,19 @@ function createNotesFromTemplate(node, parentId, order) {
   return created;
 }
 
-function buildMindMapFromNote(noteId) {
+function buildMindMapFromNote(noteId, existingMap = null) {
   const source = getNotes().find(n => n.id === noteId);
   if (!source) throw new Error("変換するメモが見つかりません。");
 
   const ts = nowIso();
   const map = {
-    id: makeId(),
+    id: existingMap?.id || makeId(),
     title: String(source.title || "新しいマインドマップ").slice(0, 80),
-    created_at: ts,
+    created_at: existingMap?.created_at || ts,
     updated_at: ts,
     selected_node_id: null,
+    source_note_id: source.id,
+    source_note_title: String(source.title || "無題").slice(0, 120),
     nodes: [],
   };
 
@@ -466,6 +497,30 @@ function buildMindMapFromNote(noteId) {
 
   map.selected_node_id = addNode(source, null, 1000);
   return map;
+}
+
+function getMindMapRootTitleFromData(map) {
+  const nodes = Array.isArray(map?.nodes) ? map.nodes : [];
+  const root = nodes.find(node => node.parent_id === null) ?? nodes[0];
+  return String(root?.title || "").trim();
+}
+
+function isMindMapFromNote(map, note) {
+  if (!map || !note) return false;
+  if (map.source_note_id && map.source_note_id === note.id) return true;
+
+  const noteTitle = String(note.title || "無題").trim();
+  const mapTitle = String(map.title || "").trim();
+  return Boolean(noteTitle) && mapTitle === noteTitle && getMindMapRootTitleFromData(map) === noteTitle;
+}
+
+async function findExistingMindMapForNote(note) {
+  const snap = await mindMapsCollection().get();
+  const matches = snap.docs
+    .map(doc => ({ id: doc.id, data: doc.data() }))
+    .filter(({ data }) => isMindMapFromNote(data, note))
+    .sort((a, b) => String(b.data.updated_at ?? "").localeCompare(String(a.data.updated_at ?? "")));
+  return matches[0] ?? null;
 }
 
 function buildNoteTreeFromMindMapNode(node) {
@@ -501,9 +556,10 @@ async function refreshMindMapListEntries() {
     .sort((a, b) => String(b.updated_at ?? "").localeCompare(String(a.updated_at ?? "")));
 }
 
-async function convertSelectedNoteToMindMap() {
+async function convertSelectedNoteToMindMap(noteId = state.selectedId) {
   try {
-    const selected = getSelectedNote();
+    const targetNoteId = typeof noteId === "string" ? noteId : state.selectedId;
+    const selected = getNotes().find(n => n.id === targetNoteId) ?? null;
     if (!selected) {
       showToast("変換するメモを選択してください。");
       return;
@@ -512,7 +568,17 @@ async function convertSelectedNoteToMindMap() {
     await saveCurrentEditorNow();
     if (state.mindMap) await saveMindMapNow();
 
-    const map = buildMindMapFromNote(selected.id);
+    const existing = await findExistingMindMapForNote(selected);
+    let replaceTarget = null;
+    if (existing) {
+      const decision = await showReplaceMindMapConfirm(
+        `「${selected.title || "無題"}」から作成したマインドマップがあります。置き換えますか？`,
+      );
+      if (decision === false) return;
+      if (decision === true) replaceTarget = { id: existing.id, ...existing.data };
+    }
+
+    const map = buildMindMapFromNote(selected.id, replaceTarget);
     await mindMapsCollection().doc(map.id).set(map);
     await refreshMindMapListEntries();
 
@@ -531,13 +597,13 @@ async function convertSelectedNoteToMindMap() {
     renderMindMap();
     centerMindMap();
     els.mindMapStatus.textContent = `保存済み ${state.mindMap.updated_at}`;
-    showToast("メモをマインドマップに変換しました。");
+    showToast(replaceTarget ? "マインドマップを置き換えました。" : "メモをマインドマップに変換しました。");
   } catch (e) {
     showToast(e.message);
   }
 }
 
-async function convertCurrentMindMapToNotes() {
+async function convertCurrentMindMapToNotes(rootNodeId = null) {
   try {
     if (!state.mindMap) {
       showToast("変換するマインドマップがありません。");
@@ -546,7 +612,10 @@ async function convertCurrentMindMapToNotes() {
     if (!state.data) await loadNotes();
 
     await saveMindMapNow();
-    const root = getMindMapNodes().find(node => node.parent_id === null) ?? getMindMapNodes()[0];
+    const targetRootId = typeof rootNodeId === "string" ? rootNodeId : null;
+    const root = targetRootId
+      ? getMindMapNode(targetRootId)
+      : (getMindMapNodes().find(node => node.parent_id === null) ?? getMindMapNodes()[0]);
     if (!root) {
       showToast("変換できるノードがありません。");
       return;
@@ -1084,6 +1153,432 @@ function updateEmptyState() {
   els.contentInput.classList.toggle("is-focused", document.activeElement === els.contentInput);
 }
 
+function setMemoFormatEnabled(enabled) {
+  [els.memoFormatToggleBtn, els.memoTextColorBtn, els.memoStrikeBtn, els.memoSubheadingBtn, els.memoHeadingBtn]
+    .filter(Boolean)
+    .forEach(button => { button.disabled = !enabled; });
+  if (!enabled) {
+    closeMemoFormatPanel();
+    state.memoFormatRange = null;
+    setMemoFormatUi({ strike: false, headingLevel: "normal" });
+  }
+}
+
+function positionMemoFormatPanel() {
+  if (!els.memoFormatBar || !els.memoFormatToggleBtn || els.memoFormatBar.hidden) return;
+  const rect = els.memoFormatToggleBtn.getBoundingClientRect();
+  const panel = els.memoFormatBar;
+  panel.style.top = `${rect.bottom + 8}px`;
+  panel.style.left = "0px";
+  const width = panel.offsetWidth;
+  const left = Math.max(12, Math.min(rect.right - width, window.innerWidth - width - 12));
+  panel.style.left = `${left}px`;
+}
+
+function setMemoFormatPanelOpen(open) {
+  if (!els.memoFormatBar || !els.memoFormatToggleBtn || els.memoFormatToggleBtn.disabled) return;
+  els.memoFormatBar.hidden = !open;
+  els.memoFormatToggleBtn.classList.toggle("active", open);
+  els.memoFormatToggleBtn.setAttribute("aria-expanded", String(open));
+  if (open) {
+    updateMemoFormatUiFromSelection();
+    positionMemoFormatPanel();
+  } else {
+    closeMemoTextColorPalette();
+  }
+}
+
+function closeMemoFormatPanel() {
+  if (!els.memoFormatBar || !els.memoFormatToggleBtn) return;
+  els.memoFormatBar.hidden = true;
+  els.memoFormatToggleBtn.classList.remove("active");
+  els.memoFormatToggleBtn.setAttribute("aria-expanded", "false");
+  closeMemoTextColorPalette();
+}
+
+function closeMemoTextColorPalette() {
+  if (!els.memoTextColorPalette || !els.memoTextColorBtn) return;
+  els.memoTextColorPalette.hidden = true;
+  els.memoTextColorBtn.classList.remove("is-open");
+  els.memoTextColorBtn.setAttribute("aria-expanded", "false");
+}
+
+function setMemoTextColorPaletteOpen(open) {
+  if (!els.memoTextColorPalette || !els.memoTextColorBtn || els.memoTextColorBtn.disabled) return;
+  els.memoTextColorPalette.hidden = !open;
+  els.memoTextColorBtn.classList.toggle("is-open", open);
+  els.memoTextColorBtn.setAttribute("aria-expanded", String(open));
+  if (open) positionMemoFormatPanel();
+}
+
+function setMemoTextColorPreview(color) {
+  const option = getMemoPaletteOption(color);
+  state.memoTextColor = option.value;
+  els.memoTextColorBtn?.style.setProperty("--memo-current-color", option.value);
+  if (els.memoTextColorLabel) els.memoTextColorLabel.textContent = option.label;
+  updateMemoColorSwatchSelection(option.value);
+}
+
+function createMemoTextColorSwatch(option) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "memo-color-swatch";
+  button.dataset.color = option.value;
+  button.title = option.label;
+  button.setAttribute("aria-label", option.label);
+  button.style.setProperty("--memo-swatch-color", option.value);
+  button.addEventListener("click", e => {
+    e.preventDefault();
+    e.stopPropagation();
+    const nextColor = state.memoTextColor === option.value && option.value !== MEMO_DEFAULT_TEXT_COLOR
+      ? MEMO_DEFAULT_TEXT_COLOR
+      : option.value;
+    applyMemoTextStyle({ color: nextColor });
+  });
+  return button;
+}
+
+function renderMemoTextColorPalette() {
+  if (!els.memoTextColorPalette) return;
+  els.memoTextColorPalette.innerHTML = "";
+  MEMO_TEXT_COLOR_PALETTE.forEach(option => {
+    els.memoTextColorPalette.appendChild(createMemoTextColorSwatch(option));
+  });
+  setMemoTextColorPreview(MEMO_DEFAULT_TEXT_COLOR);
+}
+
+function getMemoPaletteOption(color) {
+  const normalized = normalizeMindMapColor(color) || MEMO_DEFAULT_TEXT_COLOR;
+  return MEMO_TEXT_COLOR_PALETTE.find(option => option.value === normalized) ||
+    MEMO_TEXT_COLOR_PALETTE.find(option => option.value === MEMO_DEFAULT_TEXT_COLOR) ||
+    { label: "黒", value: MEMO_DEFAULT_TEXT_COLOR };
+}
+
+function updateMemoColorSwatchSelection(color) {
+  if (!els.memoTextColorPalette) return;
+  const selected = getMemoPaletteOption(color).value;
+  els.memoTextColorPalette.querySelectorAll(".memo-color-swatch").forEach(button => {
+    const active = button.dataset.color === selected;
+    button.classList.toggle("is-selected", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
+}
+
+function setMemoToggleActive(button, active) {
+  if (!button) return;
+  button.classList.toggle("is-active", Boolean(active));
+  button.setAttribute("aria-pressed", String(Boolean(active)));
+}
+
+function normalizeMemoHeadingLevel(level) {
+  return ["normal", "subheading", "heading"].includes(level) ? level : "normal";
+}
+
+function setMemoFormatUi({ color = state.memoTextColor, strike = state.memoStrikeActive, headingLevel = state.memoHeadingLevel } = {}) {
+  setMemoTextColorPreview(color);
+  state.memoStrikeActive = Boolean(strike);
+  state.memoHeadingLevel = normalizeMemoHeadingLevel(headingLevel);
+  setMemoToggleActive(els.memoTextColorBtn, state.memoTextColor !== MEMO_DEFAULT_TEXT_COLOR);
+  setMemoToggleActive(els.memoStrikeBtn, state.memoStrikeActive);
+  setMemoToggleActive(els.memoSubheadingBtn, state.memoHeadingLevel === "subheading");
+  setMemoToggleActive(els.memoHeadingBtn, state.memoHeadingLevel === "heading");
+}
+
+function cssColorToHex(value) {
+  const raw = String(value || "").trim().toLowerCase();
+  if (MINDMAP_HEX_COLOR_RE.test(raw)) return raw;
+  const match = raw.match(/^rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+  if (!match) return null;
+  const toHex = n => Math.max(0, Math.min(255, Number(n) || 0)).toString(16).padStart(2, "0");
+  return `#${toHex(match[1])}${toHex(match[2])}${toHex(match[3])}`;
+}
+
+function getMemoPaletteColorFromCss(value) {
+  const hex = cssColorToHex(value);
+  if (!hex) return MEMO_DEFAULT_TEXT_COLOR;
+  if (hex === "#ffffff") return MEMO_DEFAULT_TEXT_COLOR;
+  const match = MEMO_TEXT_COLOR_PALETTE.find(option => option.value === hex);
+  if (match) return match.value;
+
+  const rgb = hexToRgb(hex);
+  const nearest = MEMO_TEXT_COLOR_PALETTE
+    .map(option => {
+      const optionRgb = hexToRgb(option.value);
+      const distance =
+        (rgb.r - optionRgb.r) ** 2 +
+        (rgb.g - optionRgb.g) ** 2 +
+        (rgb.b - optionRgb.b) ** 2;
+      return { option, distance };
+    })
+    .sort((a, b) => a.distance - b.distance)[0]?.option;
+  return nearest?.value || MEMO_DEFAULT_TEXT_COLOR;
+}
+
+function nodeIsInMemoEditor(node) {
+  if (!node) return false;
+  if (node === els.contentInput) return true;
+  const element = node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement;
+  return Boolean(element && els.contentInput.contains(element));
+}
+
+function rangeIsInMemoEditor(range) {
+  return Boolean(range &&
+    nodeIsInMemoEditor(range.startContainer) &&
+    nodeIsInMemoEditor(range.endContainer));
+}
+
+function getCurrentMemoSelectionRange() {
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0) return null;
+  const range = selection.getRangeAt(0);
+  if (!rangeIsInMemoEditor(range)) return null;
+  return range.cloneRange();
+}
+
+function resetMemoFormatUiSelection() {
+  state.memoFormatRange = null;
+  setMemoFormatUi({ color: MEMO_DEFAULT_TEXT_COLOR, strike: false, headingLevel: "normal" });
+}
+
+function saveMemoFormatSelection() {
+  if (state.isApplyingMemoFormat) return;
+  const range = getCurrentMemoSelectionRange();
+  if (!range || range.collapsed) {
+    if (getSelectedNote()) resetMemoFormatUiSelection();
+    return;
+  }
+  state.memoFormatRange = range.cloneRange();
+  setMemoFormatUi(getMemoFormatStateFromRange(range));
+}
+
+function getMemoFormatRange() {
+  const currentRange = getCurrentMemoSelectionRange();
+  if (currentRange && !currentRange.collapsed) {
+    state.memoFormatRange = currentRange.cloneRange();
+    return currentRange;
+  }
+  const range = state.memoFormatRange;
+  if (!range || range.collapsed || !rangeIsInMemoEditor(range)) return null;
+  return range.cloneRange();
+}
+
+function restoreMemoFormatRange(range) {
+  els.contentInput.focus();
+  const selection = window.getSelection();
+  selection.removeAllRanges();
+  selection.addRange(range);
+}
+
+function getMemoElementFromNode(node) {
+  if (!node) return null;
+  if (node.nodeType === Node.ELEMENT_NODE) return node;
+  return node.parentElement;
+}
+
+function getMemoReferenceNode(range) {
+  if (!range) return null;
+  let node = range.startContainer;
+  if (node.nodeType === Node.ELEMENT_NODE) {
+    if (!range.collapsed && node.childNodes[range.startOffset]) {
+      return node.childNodes[range.startOffset];
+    }
+    if (range.startOffset > 0 && node.childNodes[range.startOffset - 1]) {
+      return node.childNodes[range.startOffset - 1];
+    }
+    return node.childNodes[range.startOffset] || node;
+  }
+  return node;
+}
+
+function getMemoStrikeStateFromRange(range, element) {
+  if (!range) return state.memoStrikeActive;
+  if (element?.closest?.(".memo-text-strike") || element?.querySelector?.(".memo-text-strike")) {
+    return true;
+  }
+  if (element) {
+    const decoration = window.getComputedStyle(element).textDecorationLine || "";
+    if (decoration.includes("line-through")) return true;
+  }
+  const fragment = range.cloneContents();
+  return getMemoMatchingElements(fragment, ".memo-text-strike").length > 0;
+}
+
+function getMemoFormatStateFromRange(range) {
+  const element = getMemoElementFromNode(getMemoReferenceNode(range));
+  if (!element || !els.contentInput.contains(element)) {
+    return {
+      color: state.memoTextColor,
+      strike: state.memoStrikeActive,
+      headingLevel: state.memoHeadingLevel,
+    };
+  }
+
+  const colorElement = element.closest?.("[style*='color']") || element;
+  const computed = window.getComputedStyle(colorElement);
+  const decoration = window.getComputedStyle(element).textDecorationLine || "";
+  const headingElement = element.closest?.(".memo-text-heading, .memo-text-subheading, .memo-text-normal");
+  const headingLevel = headingElement?.classList.contains("memo-text-heading")
+    ? "heading"
+    : (headingElement?.classList.contains("memo-text-subheading") ? "subheading" : "normal");
+  return {
+    color: getMemoPaletteColorFromCss(colorElement.style?.color || computed.color),
+    strike: getMemoStrikeStateFromRange(range, element) || decoration.includes("line-through"),
+    headingLevel,
+  };
+}
+
+function updateMemoFormatUiFromSelection() {
+  if (state.isApplyingMemoFormat) return;
+  if (!getSelectedNote()) {
+    setMemoFormatEnabled(false);
+    return;
+  }
+  const range = getCurrentMemoSelectionRange();
+  if (!range || range.collapsed) {
+    resetMemoFormatUiSelection();
+    return;
+  }
+  state.memoFormatRange = range.cloneRange();
+  setMemoFormatUi(getMemoFormatStateFromRange(range));
+}
+
+function selectedFragmentHasText(fragment) {
+  return Boolean(fragment.textContent.replace(/\u200b/g, "").trim());
+}
+
+function getMemoMatchingElements(root, selector) {
+  if (!root) return [];
+  const elements = [];
+  if (root.nodeType === Node.ELEMENT_NODE && root.matches?.(selector)) {
+    elements.push(root);
+  }
+  if (root.querySelectorAll) {
+    elements.push(...root.querySelectorAll(selector));
+  }
+  return elements;
+}
+
+function removeMemoHeadingClasses(root) {
+  getMemoMatchingElements(root, ".memo-text-heading, .memo-text-subheading, .memo-text-normal").forEach(element => {
+    element.classList.remove("memo-text-heading", "memo-text-subheading", "memo-text-normal");
+    if (element.tagName === "SPAN" && element.className.trim() === "" && !element.getAttribute("style")) {
+      element.replaceWith(...element.childNodes);
+    }
+  });
+}
+
+function removeMemoColorStyles(root) {
+  getMemoMatchingElements(root, "[style*='color'], .memo-text-white").forEach(element => {
+    element.style.removeProperty("color");
+    element.classList.remove("memo-text-white");
+    if (element.tagName === "SPAN" && element.className.trim() === "" && !element.getAttribute("style")) {
+      element.replaceWith(...element.childNodes);
+    }
+  });
+}
+
+function removeMemoStrikeClasses(root) {
+  getMemoMatchingElements(root, ".memo-text-strike").forEach(element => {
+    element.classList.remove("memo-text-strike");
+    if (element.tagName === "SPAN" && element.className.trim() === "" && !element.getAttribute("style")) {
+      element.replaceWith(...element.childNodes);
+    }
+  });
+}
+
+function getMemoHeadingClass(level) {
+  if (level === "heading") return "memo-text-heading";
+  if (level === "subheading") return "memo-text-subheading";
+  if (level === "normal") return "memo-text-normal";
+  return "";
+}
+
+function getMemoHeadingLevelForAction() {
+  const range = getMemoFormatRange();
+  if (!range) return state.memoHeadingLevel;
+  return getMemoFormatStateFromRange(range).headingLevel;
+}
+
+function getMemoStrikeForAction() {
+  const range = getMemoFormatRange();
+  if (!range) return state.memoStrikeActive;
+  return getMemoFormatStateFromRange(range).strike;
+}
+
+function getMemoStrikeElementForRange(range) {
+  const element = getMemoElementFromNode(getMemoReferenceNode(range));
+  const strikeElement = element?.closest?.(".memo-text-strike");
+  return strikeElement && els.contentInput.contains(strikeElement) ? strikeElement : null;
+}
+
+function applyMemoTextStyle({ color = null, strike = null, headingLevel = null } = {}) {
+  if (!getSelectedNote()) {
+    resetMemoFormatUiSelection();
+    showToast("先にメモを選択してください。");
+    return;
+  }
+
+  let range = getMemoFormatRange();
+  if (!range || range.collapsed) {
+    resetMemoFormatUiSelection();
+    showToast("装飾する文字を選択してください。");
+    return;
+  }
+  if (strike === false) {
+    const strikeElement = getMemoStrikeElementForRange(range);
+    if (strikeElement) {
+      range = document.createRange();
+      range.selectNode(strikeElement);
+    }
+  }
+
+  const colorValue = color ? normalizeMindMapColor(color) : null;
+  if (!selectedFragmentHasText(range.cloneContents())) {
+    resetMemoFormatUiSelection();
+    showToast("装飾する文字を選択してください。");
+    return;
+  }
+
+  state.isApplyingMemoFormat = true;
+  const fragment = range.extractContents();
+  const span = document.createElement("span");
+  const targetHeadingLevel = headingLevel === null ? null : normalizeMemoHeadingLevel(headingLevel);
+  try {
+    if (colorValue) {
+      removeMemoColorStyles(fragment);
+      span.style.color = colorValue;
+      span.classList.toggle("memo-text-white", colorValue === "#ffffff");
+    }
+    if (strike !== null) {
+      removeMemoStrikeClasses(fragment);
+      if (strike) span.classList.add("memo-text-strike");
+    }
+    if (targetHeadingLevel !== null) {
+      removeMemoHeadingClasses(fragment);
+      const headingClass = getMemoHeadingClass(targetHeadingLevel);
+      if (headingClass) span.classList.add(headingClass);
+    }
+    span.appendChild(fragment);
+    range.insertNode(span);
+
+    const styledRange = document.createRange();
+    styledRange.selectNode(span);
+    restoreMemoFormatRange(styledRange);
+    state.memoFormatRange = styledRange.cloneRange();
+    setMemoFormatUi({
+      color: colorValue || state.memoTextColor,
+      strike: strike ?? state.memoStrikeActive,
+      headingLevel: targetHeadingLevel ?? state.memoHeadingLevel,
+    });
+    updateEmptyState();
+    scheduleSave();
+  } finally {
+    setTimeout(() => {
+      state.isApplyingMemoFormat = false;
+    }, 0);
+  }
+}
+
 // ── Tree render ───────────────────────────────────────────────────────────────
 
 function renderTree() {
@@ -1242,6 +1737,7 @@ function renderNode(note, treeCtx) {
 // ── Editor render ─────────────────────────────────────────────────────────────
 
 function renderEditor() {
+  state.memoFormatRange = null;
   const note = getSelectedNote();
   if (!note) {
     els.titleInput.value         = "";
@@ -1257,6 +1753,8 @@ function renderEditor() {
     els.checkBtn.title = "チェックを付ける";
     setButtonContent(els.checkBtn, "✓");
     if (els.noteToMindMapBtn) els.noteToMindMapBtn.disabled = true;
+    setMemoFormatUi({ color: MEMO_DEFAULT_TEXT_COLOR, strike: false, headingLevel: "normal" });
+    setMemoFormatEnabled(false);
     updateEmptyState();
     updateUndoButton();
     return;
@@ -1266,6 +1764,8 @@ function renderEditor() {
   els.checkBtn.title = note.checked ? "チェックを外す" : "チェックを付ける";
   setButtonContent(els.checkBtn, "✓");
   if (els.noteToMindMapBtn) els.noteToMindMapBtn.disabled = false;
+  setMemoFormatEnabled(true);
+  setMemoFormatUi({ color: MEMO_DEFAULT_TEXT_COLOR, strike: false, headingLevel: "normal" });
   els.contentInput.dataset.placeholder = "ここにメモを書いてください";
   els.contentInput.contentEditable = "true";
   els.titleInput.placeholder = "タイトル";
@@ -1865,6 +2365,10 @@ const MINDMAP_COLOR_PALETTE = [
   { label: "紫", value: "#a855f7" },
   { label: "ピンク", value: "#ec4899" },
 ];
+const MEMO_TEXT_COLOR_PALETTE = [
+  ...MINDMAP_COLOR_PALETTE.filter(option => option.value !== "#ffffff"),
+  { label: "オレンジ", value: "#f97316" },
+];
 
 function createDefaultMindMap(id = makeId()) {
   const rootId = makeId();
@@ -1921,6 +2425,8 @@ function normalizeMindMap(raw, id) {
     created_at: raw?.created_at || fallback.created_at,
     updated_at: raw?.updated_at || fallback.updated_at,
     selected_node_id: selected,
+    source_note_id: raw?.source_note_id ? String(raw.source_note_id) : null,
+    source_note_title: raw?.source_note_title ? String(raw.source_note_title).slice(0, 120) : "",
     nodes: cleaned,
   };
 }
@@ -2200,6 +2706,8 @@ function serializeMindMap() {
     created_at: map.created_at,
     updated_at: map.updated_at,
     selected_node_id: state.mindMapSelectedId,
+    source_note_id: map.source_note_id || null,
+    source_note_title: map.source_note_title || "",
     nodes: getMindMapNodes().map(node => ({
       id: node.id,
       parent_id: node.parent_id ?? null,
@@ -3074,6 +3582,13 @@ async function switchMindMap(id) {
   closeMindMapListPanel();
 }
 
+async function convertMindMapListEntryToNotes(id) {
+  if (!id) return;
+  if (state.mindMap?.id !== id) await switchMindMap(id);
+  if (state.mindMap?.id !== id) return;
+  await convertCurrentMindMapToNotes();
+}
+
 async function deleteMindMap(id) {
   if (state.mindMapList.length <= 1) return;
   const target = state.mindMapList.find(m => m.id === id);
@@ -3206,6 +3721,11 @@ function renderMindMapList() {
     actions.appendChild(deleteBtn);
 
     item.appendChild(actions);
+    item.addEventListener("contextmenu", e => {
+      e.preventDefault();
+      e.stopPropagation();
+      showMindMapListCtxMenu(e.clientX, e.clientY, entry.id);
+    });
     els.mindMapListItems.appendChild(item);
   });
 }
@@ -3400,6 +3920,18 @@ function positionMindMapLinkCtxMenu(x, y) {
   positionMindMapMenu(els.mindMapLinkContextMenu, x, y);
 }
 
+function showMindMapListCtxMenu(x, y, mapId) {
+  if (!state.mindMapList.some(entry => entry.id === mapId)) return;
+
+  hideCtxMenu();
+  hideMediaCtxMenu();
+  hideMindMapCtxMenu();
+  if (els.accountMenu) els.accountMenu.hidden = true;
+
+  state.mindMapListContextMapId = mapId;
+  positionMindMapMenu(els.mindMapListContextMenu, x, y);
+}
+
 function showMindMapCtxMenu(x, y, nodeId) {
   const node = getMindMapNode(nodeId);
   if (!node) return;
@@ -3408,8 +3940,10 @@ function showMindMapCtxMenu(x, y, nodeId) {
   hideMediaCtxMenu();
   closeMindMapListPanel();
   if (els.accountMenu) els.accountMenu.hidden = true;
+  if (els.mindMapListContextMenu) els.mindMapListContextMenu.hidden = true;
   if (els.mindMapLinkContextMenu) els.mindMapLinkContextMenu.hidden = true;
   state.mindMapContextLinkNodeId = null;
+  state.mindMapListContextMapId = null;
 
   state.mindMapContextNodeId = nodeId;
   state.mindMapSelectedId = nodeId;
@@ -3444,8 +3978,10 @@ function showMindMapLinkCtxMenu(x, y, childId) {
   hideMediaCtxMenu();
   closeMindMapListPanel();
   if (els.accountMenu) els.accountMenu.hidden = true;
+  if (els.mindMapListContextMenu) els.mindMapListContextMenu.hidden = true;
   els.mindMapContextMenu.hidden = true;
   state.mindMapContextNodeId = null;
+  state.mindMapListContextMapId = null;
 
   state.mindMapContextLinkNodeId = childId;
   state.mindMapSelectedId = childId;
@@ -3457,10 +3993,12 @@ function showMindMapLinkCtxMenu(x, y, childId) {
 
 function hideMindMapCtxMenu() {
   els.mindMapContextMenu.hidden = true;
+  if (els.mindMapListContextMenu) els.mindMapListContextMenu.hidden = true;
   if (els.mindMapLinkContextMenu) els.mindMapLinkContextMenu.hidden = true;
   closeMindMapContextColorPalettes();
   state.mindMapContextNodeId = null;
   state.mindMapContextLinkNodeId = null;
+  state.mindMapListContextMapId = null;
 }
 
 els.mindMapBtn.addEventListener("click", openMindMapPanel);
@@ -3516,7 +4054,7 @@ els.mindMapAddChildBtn?.addEventListener("click", () => addMindMapNode(state.min
 els.mindMapAlignChildrenBtn?.addEventListener("click", alignMindMapSiblingNodes);
 els.mindMapDeleteNodeBtn?.addEventListener("click", deleteSelectedMindMapNode);
 els.mindMapUndoBtn.addEventListener("click", undoMindMapLastChange);
-els.mindMapToNoteBtn?.addEventListener("click", convertCurrentMindMapToNotes);
+els.mindMapToNoteBtn?.addEventListener("click", () => convertCurrentMindMapToNotes());
 els.mindMapContextMenu.addEventListener("click", async e => {
   const colorToggle = e.target.closest("[data-mindmap-context-color-toggle]");
   if (colorToggle) {
@@ -3540,6 +4078,9 @@ els.mindMapContextMenu.addEventListener("click", async e => {
       break;
     case "add-child":
       addMindMapNode(nodeId);
+      break;
+    case "convert-note":
+      await convertCurrentMindMapToNotes(nodeId);
       break;
     case "toggle-children":
       toggleMindMapChildren(nodeId);
@@ -3586,6 +4127,14 @@ els.mindMapListItems.addEventListener("click", e => {
     switchMindMap(id);
   }
 });
+els.mindMapListContextMenu?.addEventListener("click", async e => {
+  const btn = e.target.closest("[data-mindmap-list-action]");
+  if (!btn || btn.disabled) return;
+  const action = btn.dataset.mindmapListAction;
+  const id = state.mindMapListContextMapId;
+  hideMindMapCtxMenu();
+  if (action === "convert-note") await convertMindMapListEntryToNotes(id);
+});
 els.mindMapCenterBtn?.addEventListener("click", centerMindMap);
 els.mindMapZoomOutBtn.addEventListener("click", () => setMindMapZoom(state.mindMapZoom - 0.12));
 els.mindMapZoomInBtn.addEventListener("click", () => setMindMapZoom(state.mindMapZoom + 0.12));
@@ -3630,6 +4179,7 @@ els.mindMapCanvas.addEventListener("pointerup", finishMindMapPan);
 els.mindMapCanvas.addEventListener("pointercancel", finishMindMapPan);
 window.addEventListener("resize", () => {
   if (!els.mindMapOverlay.hidden && !state.mindMapCentered) centerMindMap();
+  positionMemoFormatPanel();
 });
 
 function resetMindMapState() {
@@ -3661,40 +4211,150 @@ function resetMindMapState() {
 
 // ── Media ─────────────────────────────────────────────────────────────────────
 
-async function uploadMedia(noteId, files) {
-  if (!STORAGE_ENABLED) {
-    showToast("画像・動画の添付は現在利用できません（Firebase Storage未対応）。");
-    return;
+const INLINE_IMAGE_MAX_EDGE = 1280;
+const INLINE_IMAGE_TARGET_BYTES = 450 * 1024;
+
+function mediaFileName(file, fallback = "image.png") {
+  return file?.name || fallback;
+}
+
+function mediaFileExtension(file, fallback = "bin") {
+  return (mediaFileName(file).match(/\.([^.\/]+)$/)?.[1] || fallback).toLowerCase();
+}
+
+function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error || new Error("画像の読み込みに失敗しました。"));
+    reader.readAsDataURL(blob);
+  });
+}
+
+function loadImageForInline(file) {
+  const url = URL.createObjectURL(file);
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve(img);
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("画像の読み込みに失敗しました。"));
+    };
+    img.src = url;
+  });
+}
+
+function canvasToBlob(canvas, type, quality) {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error("画像の変換に失敗しました。")), type, quality);
+  });
+}
+
+async function createInlineImageDataUrl(file) {
+  if (file.type === "image/gif") return blobToDataUrl(file);
+
+  const image = await loadImageForInline(file);
+  const sourceW = image.naturalWidth || image.width;
+  const sourceH = image.naturalHeight || image.height;
+  if (!sourceW || !sourceH) return blobToDataUrl(file);
+
+  let scale = Math.min(1, INLINE_IMAGE_MAX_EDGE / Math.max(sourceW, sourceH));
+  let quality = 0.84;
+  let blob = null;
+
+  for (let i = 0; i < 5; i += 1) {
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(sourceW * scale));
+    canvas.height = Math.max(1, Math.round(sourceH * scale));
+    canvas.getContext("2d").drawImage(image, 0, 0, canvas.width, canvas.height);
+    blob = await canvasToBlob(canvas, "image/jpeg", quality);
+    if (blob.size <= INLINE_IMAGE_TARGET_BYTES || scale <= 0.45) break;
+    if (quality > 0.68) quality = Math.max(0.68, quality - 0.08);
+    else scale *= 0.82;
   }
+
+  return blobToDataUrl(blob || file);
+}
+
+async function uploadFileToStorage(file) {
+  const ext = mediaFileExtension(file);
+  const mediaId = makeId();
+  const storagePath = `users/${state.uid}/media/${mediaId}.${ext}`;
+  const fileRef = storage.ref(storagePath);
+  await fileRef.put(file, { contentType: file.type });
+  return {
+    id:            mediaId,
+    filename:      storagePath,
+    original_name: mediaFileName(file),
+    mime_type:     file.type,
+    created_at:    nowIso(),
+    storagePath,
+    downloadURL:   await fileRef.getDownloadURL(),
+  };
+}
+
+async function addUploadedMediaItem(noteId, note, item) {
+  const updates = { media: [...(note.media ?? []), item], updated_at: nowIso() };
+  await notesCollection().doc(noteId).set(updates, { merge: true });
+  Object.assign(note, updates);
+}
+
+function replaceMediaElementSource(figure, item) {
+  if (!figure?.isConnected) return false;
+  const media = figure.querySelector(".inline-media");
+  if (!media) return false;
+  media.addEventListener(media.tagName === "VIDEO" ? "loadedmetadata" : "load", () => scheduleMediaCaretSync(), { once: true });
+  media.src = item.downloadURL;
+  if (media.tagName === "IMG") media.alt = item.original_name;
+  return true;
+}
+
+async function uploadMedia(noteId, files) {
   const note = state.data.notes.find(n => n.id === noteId);
   if (!note) return;
 
-  for (const file of files) {
+  for (const file of [...files]) {
     if (!file.type.startsWith("image/") && !file.type.startsWith("video/")) {
-      showToast(`${file.name}: 画像・動画ファイルのみ添付できます。`);
+      showToast(`${mediaFileName(file, "ファイル")}: 画像・動画ファイルのみ添付できます。`);
       continue;
     }
     try {
-      const ext         = (file.name.match(/\.([^.\/]+)$/)?.[1] || "bin").toLowerCase();
-      const mediaId     = makeId();
-      const storagePath = `users/${state.uid}/media/${mediaId}.${ext}`;
-      const fileRef     = storage.ref(storagePath);
-      await fileRef.put(file, { contentType: file.type });
-      const downloadURL = await fileRef.getDownloadURL();
-      const item = {
-        id:            mediaId,
-        filename:      storagePath,
-        original_name: file.name,
-        mime_type:     file.type,
-        created_at:    nowIso(),
-        storagePath,
-        downloadURL,
-      };
-      const updates = { media: [...(note.media ?? []), item], updated_at: nowIso() };
-      await notesCollection().doc(noteId).set(updates, { merge: true });
-      Object.assign(note, updates);
+      if (file.type.startsWith("image/")) {
+        const inlineItem = {
+          id:            makeId(),
+          filename:      mediaFileName(file),
+          original_name: mediaFileName(file),
+          mime_type:     file.type || "image/jpeg",
+          created_at:    nowIso(),
+          storagePath:   null,
+          downloadURL:   await createInlineImageDataUrl(file),
+        };
+        const figure = insertMediaElement(inlineItem);
+        showToast("画像を追加しました。");
+
+        if (!STORAGE_ENABLED) continue;
+        try {
+          const uploadedItem = await uploadFileToStorage(file);
+          await addUploadedMediaItem(noteId, note, uploadedItem);
+          if (replaceMediaElementSource(figure, uploadedItem)) scheduleSave();
+        } catch (uploadErr) {
+          showToast("Storage保存に失敗したため、画像を本文に埋め込みました。");
+        }
+        continue;
+      }
+
+      if (!STORAGE_ENABLED) {
+        showToast("動画の添付に必要なStorage設定が見つかりません。");
+        continue;
+      }
+      const item = await uploadFileToStorage(file);
+      await addUploadedMediaItem(noteId, note, item);
       insertMediaElement(item);
-    } catch (e) { showToast(`${file.name}: ${e.message}`); }
+      showToast("動画を追加しました。");
+    } catch (e) { showToast(`${mediaFileName(file, "ファイル")}: ${e.message}`); }
   }
 }
 
@@ -4175,6 +4835,7 @@ function insertMediaElement(item) {
   figure.scrollIntoView({ behavior: "smooth", block: "nearest" });
   updateEmptyState();
   scheduleSave();
+  return figure;
 }
 
 // ── ライトボックス ─────────────────────────────────────────────────────────────
@@ -4413,7 +5074,7 @@ els.cropCanvas.addEventListener("pointercancel", () => { _crop.drag = null; });
 async function confirmCrop() {
   if (!STORAGE_ENABLED) {
     closeCropModal();
-    showToast("トリミング機能は現在利用できません（Firebase Storage未対応）。");
+    showToast("トリミングに必要なStorage設定が見つかりません。");
     return;
   }
   const { figure, imgEl, scale, rect } = _crop;
@@ -4731,6 +5392,7 @@ els.contextMenu.addEventListener("click", async e => {
   switch (action) {
     case "rename":    startInlineRename(id); break;
     case "add-child": await createNote(id); break;
+    case "convert-mindmap": await convertSelectedNoteToMindMap(id); break;
     case "toggle-check": await toggleCheckedNote(id); break;
     case "toggle-pin": await togglePinnedNote(id); break;
     case "move-sibling-top": await moveNoteToSiblingEdge(id, "start"); break;
@@ -4747,10 +5409,18 @@ els.contextMenu.addEventListener("click", async e => {
 document.addEventListener("click", e => {
   if (!els.contextMenu.hidden      && !els.contextMenu.contains(e.target))      hideCtxMenu();
   if (!els.mediaContextMenu.hidden && !els.mediaContextMenu.contains(e.target)) hideMediaCtxMenu();
+  const clickedMemoFormat = Boolean(
+    els.memoFormatBar?.contains(e.target) ||
+    els.memoFormatToggleBtn?.contains(e.target)
+  );
+  if (!clickedMemoFormat) closeMemoFormatPanel();
+  if (!e.target.closest(".memo-color-control")) closeMemoTextColorPalette();
   if (!e.target.closest(".mindmap-color-current")) closeMindMapColorControls();
   const mindMapMenuOpen = !els.mindMapContextMenu.hidden ||
+    Boolean(els.mindMapListContextMenu && !els.mindMapListContextMenu.hidden) ||
     Boolean(els.mindMapLinkContextMenu && !els.mindMapLinkContextMenu.hidden);
   const clickedMindMapMenu = els.mindMapContextMenu.contains(e.target) ||
+    Boolean(els.mindMapListContextMenu?.contains(e.target)) ||
     Boolean(els.mindMapLinkContextMenu?.contains(e.target));
   if (mindMapMenuOpen && !clickedMindMapMenu) hideMindMapCtxMenu();
   const accountButtonClicked = [els.accountBtn, els.mindMapAccountBtn]
@@ -4773,6 +5443,7 @@ document.addEventListener("keydown", e => {
     hideCtxMenu();
     hideMediaCtxMenu();
     hideMindMapCtxMenu();
+    closeMemoFormatPanel();
     closeMindMapColorControls();
     els.accountMenu.hidden = true;
     closeMobileMenu();
@@ -4801,7 +5472,10 @@ document.addEventListener("dragend", () => {
   stopTreeAutoScroll();
 });
 
-document.addEventListener("selectionchange", updateActiveMediaCaretFromSelection);
+document.addEventListener("selectionchange", () => {
+  saveMemoFormatSelection();
+  updateActiveMediaCaretFromSelection();
+});
 
 // ── ボタン / 入力バインド ─────────────────────────────────────────────────────
 
@@ -4821,17 +5495,54 @@ if (mobileMenuMql.addEventListener) {
 }
 
 els.titleInput.addEventListener("input", scheduleSave);
-els.noteToMindMapBtn?.addEventListener("click", convertSelectedNoteToMindMap);
+els.noteToMindMapBtn?.addEventListener("click", () => convertSelectedNoteToMindMap());
 els.checkBtn.addEventListener("click", () => {
   if (!state.selectedId) { showToast("先にメモを選択してください。"); return; }
   toggleCheckedNote(state.selectedId);
 });
+renderMemoTextColorPalette();
+setMemoFormatEnabled(false);
+els.memoFormatToggleBtn?.addEventListener("pointerdown", e => {
+  e.preventDefault();
+});
+els.memoFormatToggleBtn?.addEventListener("click", e => {
+  e.stopPropagation();
+  setMemoFormatPanelOpen(Boolean(els.memoFormatBar?.hidden));
+});
+els.memoFormatBar?.addEventListener("pointerdown", e => {
+  if (e.target.closest("button")) e.preventDefault();
+});
+els.memoTextColorBtn?.addEventListener("click", e => {
+  e.stopPropagation();
+  setMemoTextColorPaletteOpen(Boolean(els.memoTextColorPalette?.hidden));
+});
+els.memoStrikeBtn?.addEventListener("click", e => {
+  e.stopPropagation();
+  closeMemoTextColorPalette();
+  applyMemoTextStyle({ strike: !getMemoStrikeForAction() });
+});
+els.memoSubheadingBtn?.addEventListener("click", e => {
+  e.stopPropagation();
+  closeMemoTextColorPalette();
+  const currentLevel = getMemoHeadingLevelForAction();
+  const nextLevel = currentLevel === "subheading" ? "normal" : "subheading";
+  applyMemoTextStyle({ headingLevel: nextLevel });
+});
+els.memoHeadingBtn?.addEventListener("click", e => {
+  e.stopPropagation();
+  closeMemoTextColorPalette();
+  const currentLevel = getMemoHeadingLevelForAction();
+  const nextLevel = currentLevel === "heading" ? "normal" : "heading";
+  applyMemoTextStyle({ headingLevel: nextLevel });
+});
 
 els.contentInput.addEventListener("focus", () => {
   els.contentInput.classList.add("is-focused");
+  updateMemoFormatUiFromSelection();
 });
 els.contentInput.addEventListener("click", () => {
   els.contentInput.classList.add("is-focused");
+  updateMemoFormatUiFromSelection();
 });
 els.contentInput.addEventListener("blur", () => {
   els.contentInput.classList.remove("is-focused");
@@ -4848,10 +5559,12 @@ els.contentInput.addEventListener("keydown", e => {
 els.contentInput.addEventListener("input", () => {
   repairMediaCaretAfterEdit();
   updateEmptyState();
+  updateMemoFormatUiFromSelection();
   if (!_isComposing) scheduleSave();
 });
 els.contentInput.addEventListener("keyup", e => {
   if (e.key === "Backspace" || e.key === "Delete") repairMediaCaretAfterEdit();
+  updateMemoFormatUiFromSelection();
 });
 
 els.searchInput.addEventListener("input", renderTree);

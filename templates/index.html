@@ -91,6 +91,10 @@
           <button id="checkBtn" class="btn ghost check-toggle-btn" title="チェックを付ける">
             <span class="btn-icon" aria-hidden="true">✓</span>
           </button>
+          <button id="memoFormatToggleBtn" class="btn ghost" type="button" title="文字の色・書式を変更" aria-label="文字の色・書式を変更" aria-expanded="false" aria-controls="memoFormatBar">
+            <span class="btn-icon" aria-hidden="true">A</span>
+            <span class="btn-label">文字</span>
+          </button>
           <button id="noteToMindMapBtn" class="btn ghost" title="選択中のメモをマインドマップに変換">
             <span class="btn-icon" aria-hidden="true">⇄</span>
             <span class="btn-label">マップ化</span>
@@ -111,6 +115,25 @@
       </section>
 
       <section id="selectedInfo" class="selected-info"></section>
+
+      <section id="memoFormatBar" class="memo-format-bar" aria-label="文字の書式" hidden>
+        <div class="memo-color-control">
+          <button id="memoTextColorBtn" class="memo-format-btn memo-color-btn" type="button" title="文字色を変更" aria-label="文字色を変更" aria-expanded="false" aria-controls="memoTextColorPalette">
+            <span class="memo-color-current" aria-hidden="true"></span>
+            <span id="memoTextColorLabel" class="btn-label">黒</span>
+          </button>
+          <div id="memoTextColorPalette" class="memo-color-palette" hidden></div>
+        </div>
+        <button id="memoStrikeBtn" class="memo-format-btn" type="button" title="選択した文字に横線を引く" aria-label="選択した文字に横線を引く">
+          <span class="btn-icon memo-strike-icon" aria-hidden="true">S</span>
+        </button>
+        <button id="memoSubheadingBtn" class="memo-format-btn memo-heading-btn" type="button" title="選択した文字を小見出しにする" aria-label="選択した文字を小見出しにする">
+          <span class="btn-label">小見出し</span>
+        </button>
+        <button id="memoHeadingBtn" class="memo-format-btn memo-heading-btn" type="button" title="選択した文字を見出しにする" aria-label="選択した文字を見出しにする">
+          <span class="btn-label">見出し</span>
+        </button>
+      </section>
 
       <div id="contentInput"
            class="content-input is-empty"
@@ -209,6 +232,7 @@
       <p class="confirm-msg" id="confirmMsg"></p>
       <div class="confirm-btns">
         <button id="confirmCancel" class="btn ghost">キャンセル</button>
+        <button id="confirmExtra"  class="btn ghost" hidden>無視して追加</button>
         <button id="confirmOk"     class="btn danger">削除</button>
       </div>
     </div>
@@ -318,9 +342,14 @@
         <ul id="mindMapListItems" class="mindmap-list-items"></ul>
       </div>
 
+      <div id="mindMapListContextMenu" class="context-menu" hidden>
+        <button class="ctx-item" data-mindmap-list-action="convert-note">⇄　メモに変換</button>
+      </div>
+
       <div id="mindMapContextMenu" class="context-menu mindmap-context-menu" hidden>
         <button class="ctx-item" data-mindmap-action="rename">✏️　名前を変更</button>
         <button class="ctx-item" data-mindmap-action="add-child">＋　子ノードを追加</button>
+        <button class="ctx-item" data-mindmap-action="convert-note">⇄　メモに変換</button>
         <button class="ctx-item" data-mindmap-action="toggle-children">▾　子を隠す</button>
         <button class="ctx-item" data-mindmap-action="align">↕　同階層を整列</button>
         <button class="ctx-item" data-mindmap-action="undo">↶　戻す</button>
@@ -445,6 +474,7 @@
   <div id="contextMenu" class="context-menu" hidden>
     <button class="ctx-item" data-action="rename">✏️　名前を変更</button>
     <button class="ctx-item" data-action="add-child">＋　メモを追加</button>
+    <button class="ctx-item" data-action="convert-mindmap">⇄　マインドマップ化</button>
     <button class="ctx-item" data-action="toggle-check">✓　チェックする</button>
     <button class="ctx-item" data-action="toggle-pin">📌　ピン留め</button>
     <button class="ctx-item" data-action="move-sibling-top">↑　最上位へ移動</button>
