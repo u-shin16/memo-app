@@ -319,19 +319,23 @@
         <button class="ctx-item" data-mindmap-action="center">◎　中央に戻す</button>
         <div class="ctx-sep"></div>
         <div class="mindmap-context-color-panel" aria-label="色を変更">
-          <p class="mindmap-context-color-title">色を変更</p>
-          <div class="mindmap-context-color-row">
-            <span class="mindmap-context-color-label">塗り</span>
-            <div class="mindmap-context-color-palette" data-mindmap-context-color-palette="fill_color"></div>
+          <div class="mindmap-context-color-actions" role="group" aria-label="色を変更">
+            <button class="mindmap-context-color-toggle" type="button" data-mindmap-context-color-toggle="fill_color" aria-expanded="false" aria-controls="mindMapContextFillPalette">
+              <span class="mindmap-context-color-current" aria-hidden="true"></span>
+              <span>塗り</span>
+            </button>
+            <button class="mindmap-context-color-toggle" type="button" data-mindmap-context-color-toggle="border_color" aria-expanded="false" aria-controls="mindMapContextBorderPalette">
+              <span class="mindmap-context-color-current" aria-hidden="true"></span>
+              <span>枠</span>
+            </button>
+            <button class="mindmap-context-color-toggle" type="button" data-mindmap-context-color-toggle="link_color" aria-expanded="false" aria-controls="mindMapContextLinkPalette">
+              <span class="mindmap-context-color-current" aria-hidden="true"></span>
+              <span>線</span>
+            </button>
           </div>
-          <div class="mindmap-context-color-row">
-            <span class="mindmap-context-color-label">枠</span>
-            <div class="mindmap-context-color-palette" data-mindmap-context-color-palette="border_color"></div>
-          </div>
-          <div class="mindmap-context-color-row">
-            <span class="mindmap-context-color-label">線</span>
-            <div class="mindmap-context-color-palette" data-mindmap-context-color-palette="link_color"></div>
-          </div>
+          <div id="mindMapContextFillPalette" class="mindmap-context-color-palette" data-mindmap-context-color-palette="fill_color" hidden></div>
+          <div id="mindMapContextBorderPalette" class="mindmap-context-color-palette" data-mindmap-context-color-palette="border_color" hidden></div>
+          <div id="mindMapContextLinkPalette" class="mindmap-context-color-palette" data-mindmap-context-color-palette="link_color" hidden></div>
         </div>
         <div class="ctx-sep"></div>
         <button class="ctx-item ctx-danger" data-mindmap-action="delete">🗑　削除</button>
@@ -339,8 +343,13 @@
 
       <div id="mindMapLinkContextMenu" class="context-menu mindmap-context-menu mindmap-link-context-menu" hidden>
         <div class="mindmap-context-color-panel" aria-label="線の色を変更">
-          <p class="mindmap-context-color-title">線の色</p>
-          <div class="mindmap-context-color-palette is-link-only" id="mindMapLinkContextPalette"></div>
+          <div class="mindmap-context-color-actions is-link-only" role="group" aria-label="線の色を変更">
+            <button class="mindmap-context-color-toggle" type="button" data-mindmap-link-context-color-toggle aria-expanded="false" aria-controls="mindMapLinkContextPalette">
+              <span class="mindmap-context-color-current" aria-hidden="true"></span>
+              <span>線</span>
+            </button>
+          </div>
+          <div class="mindmap-context-color-palette is-link-only" id="mindMapLinkContextPalette" hidden></div>
         </div>
       </div>
 
@@ -372,7 +381,6 @@
                     <span class="mindmap-color-current-label">塗り</span>
                     <span class="mindmap-color-current-caret" aria-hidden="true">▾</span>
                   </button>
-                  <div id="mindMapNodeFillPalette" class="mindmap-color-palette" aria-label="塗り色" hidden></div>
                 </div>
                 <input id="mindMapNodeFillColorInput" class="mindmap-color-input" type="color" value="#ffffff" aria-label="ノードの塗り色">
               </div>
@@ -383,7 +391,6 @@
                     <span class="mindmap-color-current-label">枠</span>
                     <span class="mindmap-color-current-caret" aria-hidden="true">▾</span>
                   </button>
-                  <div id="mindMapNodeBorderPalette" class="mindmap-color-palette" aria-label="枠色" hidden></div>
                 </div>
                 <input id="mindMapNodeBorderColorInput" class="mindmap-color-input" type="color" value="#3b82f6" aria-label="ノードの枠色">
               </div>
@@ -394,10 +401,14 @@
                     <span class="mindmap-color-current-label">線</span>
                     <span class="mindmap-color-current-caret" aria-hidden="true">▾</span>
                   </button>
-                  <div id="mindMapLinkPalette" class="mindmap-color-palette" aria-label="ノード間の線色" hidden></div>
                 </div>
-                <input id="mindMapLinkColorInput" class="mindmap-color-input" type="color" value="#93c5fd" aria-label="ノード間の線色">
+                <input id="mindMapLinkColorInput" class="mindmap-color-input" type="color" value="#3b82f6" aria-label="ノード間の線色">
               </div>
+            </div>
+            <div class="mindmap-color-palettes">
+              <div id="mindMapNodeFillPalette" class="mindmap-color-palette" aria-label="塗り色" hidden></div>
+              <div id="mindMapNodeBorderPalette" class="mindmap-color-palette" aria-label="枠色" hidden></div>
+              <div id="mindMapLinkPalette" class="mindmap-color-palette" aria-label="ノード間の線色" hidden></div>
             </div>
           </div>
 

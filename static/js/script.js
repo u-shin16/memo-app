@@ -1320,7 +1320,6 @@ async function togglePinnedNote(noteId) {
   const nextPinned = !Boolean(note.pinned);
   try {
     await updateNote(noteId, { pinned: nextPinned });
-    selectNote(noteId);
     showToast(nextPinned ? "ピン留めしました。" : "ピン留めを解除しました。");
   } catch (e) { showToast(e.message); }
 }
@@ -1332,7 +1331,6 @@ async function toggleCheckedNote(noteId) {
   const nextChecked = !Boolean(note.checked);
   try {
     await updateNote(noteId, { checked: nextChecked });
-    selectNote(noteId);
     showToast(nextChecked ? "チェックを付けました。" : "チェックを外しました。");
   } catch (e) { showToast(e.message); }
 }
@@ -1712,7 +1710,7 @@ const MINDMAP_DEFAULT_NODE_FILL = "#ffffff";
 const MINDMAP_DEFAULT_NODE_BORDER = "#3b82f6";
 const MINDMAP_ROOT_NODE_FILL = "#2563eb";
 const MINDMAP_ROOT_NODE_BORDER = "#3b82f6";
-const MINDMAP_DEFAULT_LINK_COLOR = "#93c5fd";
+const MINDMAP_DEFAULT_LINK_COLOR = "#3b82f6";
 const MINDMAP_HEX_COLOR_RE = /^#[0-9a-f]{6}$/i;
 const MINDMAP_COLOR_PALETTE = [
   { label: "白", value: "#ffffff" },
@@ -1947,6 +1945,11 @@ function updateMindMapContextColorPaletteState(node) {
   els.mindMapContextMenu.querySelectorAll("[data-mindmap-context-color-palette]").forEach(palette => {
     const prop = palette.dataset.mindmapContextColorPalette;
     const color = node ? getMindMapContextColor(node, prop) : null;
+    const toggle = els.mindMapContextMenu.querySelector(`[data-mindmap-context-color-toggle="${prop}"]`);
+    if (toggle) {
+      toggle.disabled = !node;
+      toggle.style.setProperty("--mindmap-current-color", color || MINDMAP_DEFAULT_NODE_FILL);
+    }
     palette.querySelectorAll(".mindmap-color-swatch").forEach(button => {
       const isActive = Boolean(color) && button.dataset.color === color;
       button.disabled = !node;
@@ -1959,12 +1962,53 @@ function updateMindMapContextColorPaletteState(node) {
 function updateMindMapLinkContextPaletteState(child) {
   const parent = child?.parent_id ? getMindMapNode(child.parent_id) : null;
   const color = parent && child ? getMindMapLinkColor(parent, child) : null;
+  const toggle = els.mindMapLinkContextMenu?.querySelector("[data-mindmap-link-context-color-toggle]");
+  if (toggle) {
+    toggle.disabled = !child || !parent;
+    toggle.style.setProperty("--mindmap-current-color", color || MINDMAP_DEFAULT_LINK_COLOR);
+  }
   els.mindMapLinkContextPalette?.querySelectorAll(".mindmap-color-swatch").forEach(button => {
     const isActive = Boolean(color) && button.dataset.color === color;
     button.disabled = !child || !parent;
     button.classList.toggle("is-active", isActive);
     button.setAttribute("aria-pressed", String(isActive));
   });
+}
+
+function setMindMapContextPaletteOpen(menu, toggleSelector, palette, open) {
+  if (!menu) return;
+  const toggles = menu.querySelectorAll(toggleSelector);
+  toggles.forEach(toggle => {
+    const isTarget = Boolean(palette) && toggle.getAttribute("aria-controls") === palette.id;
+    const shouldOpen = open && isTarget && !toggle.disabled;
+    toggle.classList.toggle("is-open", shouldOpen);
+    toggle.setAttribute("aria-expanded", String(shouldOpen));
+  });
+
+  menu.querySelectorAll(".mindmap-context-color-palette").forEach(item => {
+    item.hidden = item !== palette || !open;
+  });
+}
+
+function closeMindMapContextColorPalettes() {
+  setMindMapContextPaletteOpen(els.mindMapContextMenu, "[data-mindmap-context-color-toggle]", null, false);
+  setMindMapContextPaletteOpen(els.mindMapLinkContextMenu, "[data-mindmap-link-context-color-toggle]", null, false);
+}
+
+function toggleMindMapContextColorPalette(prop) {
+  const palette = els.mindMapContextMenu.querySelector(`[data-mindmap-context-color-palette="${prop}"]`);
+  const toggle = els.mindMapContextMenu.querySelector(`[data-mindmap-context-color-toggle="${prop}"]`);
+  if (!palette || !toggle || toggle.disabled) return;
+  setMindMapContextPaletteOpen(els.mindMapContextMenu, "[data-mindmap-context-color-toggle]", palette, palette.hidden);
+  fitMindMapMenuToViewport(els.mindMapContextMenu);
+}
+
+function toggleMindMapLinkContextColorPalette() {
+  const palette = els.mindMapLinkContextPalette;
+  const toggle = els.mindMapLinkContextMenu?.querySelector("[data-mindmap-link-context-color-toggle]");
+  if (!palette || !toggle || toggle.disabled) return;
+  setMindMapContextPaletteOpen(els.mindMapLinkContextMenu, "[data-mindmap-link-context-color-toggle]", palette, palette.hidden);
+  fitMindMapMenuToViewport(els.mindMapLinkContextMenu);
 }
 
 function countMindMapDescendants(nodeId) {
@@ -3197,6 +3241,13 @@ function positionMindMapMenu(menu, x, y) {
   if (y + mh > window.innerHeight) menu.style.top = `${window.innerHeight - mh - 6}px`;
 }
 
+function fitMindMapMenuToViewport(menu) {
+  if (!menu || menu.hidden) return;
+  const x = Number.parseFloat(menu.style.left) || 0;
+  const y = Number.parseFloat(menu.style.top) || 0;
+  positionMindMapMenu(menu, x, y);
+}
+
 function positionMindMapCtxMenu(x, y) {
   positionMindMapMenu(els.mindMapContextMenu, x, y);
 }
@@ -3235,6 +3286,7 @@ function showMindMapCtxMenu(x, y, nodeId) {
   if (undoBtn) undoBtn.disabled = state.mindMapUndoStack.length === 0;
   if (deleteBtn) deleteBtn.disabled = node.parent_id === null;
   updateMindMapContextColorPaletteState(node);
+  closeMindMapContextColorPalettes();
 
   positionMindMapCtxMenu(x, y);
 }
@@ -3255,12 +3307,14 @@ function showMindMapLinkCtxMenu(x, y, childId) {
   state.mindMapSelectedId = childId;
   renderMindMap();
   updateMindMapLinkContextPaletteState(getMindMapNode(childId));
+  closeMindMapContextColorPalettes();
   positionMindMapLinkCtxMenu(x, y);
 }
 
 function hideMindMapCtxMenu() {
   els.mindMapContextMenu.hidden = true;
   if (els.mindMapLinkContextMenu) els.mindMapLinkContextMenu.hidden = true;
+  closeMindMapContextColorPalettes();
   state.mindMapContextNodeId = null;
   state.mindMapContextLinkNodeId = null;
 }
@@ -3319,6 +3373,13 @@ els.mindMapAlignChildrenBtn?.addEventListener("click", alignMindMapSiblingNodes)
 els.mindMapDeleteNodeBtn?.addEventListener("click", deleteSelectedMindMapNode);
 els.mindMapUndoBtn.addEventListener("click", undoMindMapLastChange);
 els.mindMapContextMenu.addEventListener("click", async e => {
+  const colorToggle = e.target.closest("[data-mindmap-context-color-toggle]");
+  if (colorToggle) {
+    e.stopPropagation();
+    toggleMindMapContextColorPalette(colorToggle.dataset.mindmapContextColorToggle);
+    return;
+  }
+
   const btn = e.target.closest("[data-mindmap-action]");
   if (!btn || btn.disabled) return;
 
@@ -3352,6 +3413,12 @@ els.mindMapContextMenu.addEventListener("click", async e => {
       await deleteSelectedMindMapNode();
       break;
   }
+});
+els.mindMapLinkContextMenu?.addEventListener("click", e => {
+  const colorToggle = e.target.closest("[data-mindmap-link-context-color-toggle]");
+  if (!colorToggle) return;
+  e.stopPropagation();
+  toggleMindMapLinkContextColorPalette();
 });
 els.mindMapNewBtn.addEventListener("click", createNewMindMap);
 els.mindMapSideNewBtn?.addEventListener("click", createNewMindMap);
@@ -4468,9 +4535,14 @@ function showCtxMenu(x, y, noteId) {
 function hideCtxMenu() { els.contextMenu.hidden = true; state.contextNoteId = null; }
 
 function startInlineRename(noteId) {
-  selectNote(noteId);
   const row = els.tree.querySelector(`[data-id="${noteId}"]`);
-  if (!row) { els.titleInput.focus(); els.titleInput.select(); return; }
+  if (!row) {
+    if (state.selectedId === noteId) {
+      els.titleInput.focus();
+      els.titleInput.select();
+    }
+    return;
+  }
   const span = row.querySelector(".tree-title");
   if (!span) return;
   const orig  = span.textContent;
@@ -4495,7 +4567,10 @@ function startInlineRename(noteId) {
   }
   function cancel() { if (done) return; done = true; span.textContent = orig; input.replaceWith(span); }
   input.addEventListener("blur", commit);
+  input.addEventListener("click", e => e.stopPropagation());
+  input.addEventListener("pointerdown", e => e.stopPropagation());
   input.addEventListener("keydown", e => {
+    e.stopPropagation();
     if (e.key === "Enter")  { e.preventDefault(); input.blur(); }
     if (e.key === "Escape") { input.removeEventListener("blur", commit); cancel(); }
   });
