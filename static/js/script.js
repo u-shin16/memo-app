@@ -65,6 +65,7 @@ const els = {
   mindMapLinkContextPalette: document.getElementById("mindMapLinkContextPalette"),
   mindMapTitleInput: document.getElementById("mindMapTitleInput"),
   mindMapUndoBtn:    document.getElementById("mindMapUndoBtn"),
+  mindMapToNoteBtn:  document.getElementById("mindMapToNoteBtn"),
   mindMapNewBtn:    document.getElementById("mindMapNewBtn"),
   mindMapSideNewBtn: document.getElementById("mindMapSideNewBtn"),
   mindMapAccountBtn: document.getElementById("mindMapAccountBtn"),
@@ -98,6 +99,7 @@ const els = {
   templateSaveBtn:  document.getElementById("templateSaveBtn"),
   undoBtn:          document.getElementById("undoBtn"),
   checkBtn:         document.getElementById("checkBtn"),
+  noteToMindMapBtn: document.getElementById("noteToMindMapBtn"),
   addChildBtn:      document.getElementById("addChildBtn"),
   mediaBtn:         document.getElementById("mediaBtn"),
   mediaInput:       document.getElementById("mediaInput"),
@@ -425,6 +427,145 @@ function createNotesFromTemplate(node, parentId, order) {
     created.push(...createNotesFromTemplate(child, id, (i + 1) * 1000));
   });
   return created;
+}
+
+function buildMindMapFromNote(noteId) {
+  const source = getNotes().find(n => n.id === noteId);
+  if (!source) throw new Error("変換するメモが見つかりません。");
+
+  const ts = nowIso();
+  const map = {
+    id: makeId(),
+    title: String(source.title || "新しいマインドマップ").slice(0, 80),
+    created_at: ts,
+    updated_at: ts,
+    selected_node_id: null,
+    nodes: [],
+  };
+
+  function addNode(note, parentId, order) {
+    const id = makeId();
+    map.nodes.push({
+      id,
+      parent_id: parentId,
+      title: String(note.title || "トピック").slice(0, 80),
+      order,
+      x: null,
+      y: null,
+      collapsed: false,
+      fill_color: null,
+      border_color: null,
+      link_color: null,
+    });
+
+    getChildren(note.id).forEach((child, index) => {
+      addNode(child, id, (index + 1) * 1000);
+    });
+    return id;
+  }
+
+  map.selected_node_id = addNode(source, null, 1000);
+  return map;
+}
+
+function buildNoteTreeFromMindMapNode(node) {
+  return {
+    title: String(node?.title || "新しいメモ").slice(0, 120),
+    content: "",
+    children: getMindMapChildren(node.id).map(buildNoteTreeFromMindMapNode),
+  };
+}
+
+async function writeNotesBatch(notes) {
+  const ref = notesCollection();
+  const CHUNK = 450;
+  for (let i = 0; i < notes.length; i += CHUNK) {
+    const batch = db.batch();
+    notes.slice(i, i + CHUNK).forEach(note => batch.set(ref.doc(note.id), note));
+    await batch.commit();
+  }
+}
+
+function mapListEntryFromMindMap(map) {
+  return {
+    id: map.id,
+    title: String(map.title || "新しいマインドマップ").slice(0, 80),
+    updated_at: map.updated_at || "",
+  };
+}
+
+async function refreshMindMapListEntries() {
+  const snap = await mindMapsCollection().get();
+  state.mindMapList = snap.docs
+    .map(doc => mapListEntryFromMindMap({ ...doc.data(), id: doc.id }))
+    .sort((a, b) => String(b.updated_at ?? "").localeCompare(String(a.updated_at ?? "")));
+}
+
+async function convertSelectedNoteToMindMap() {
+  try {
+    const selected = getSelectedNote();
+    if (!selected) {
+      showToast("変換するメモを選択してください。");
+      return;
+    }
+
+    await saveCurrentEditorNow();
+    if (state.mindMap) await saveMindMapNow();
+
+    const map = buildMindMapFromNote(selected.id);
+    await mindMapsCollection().doc(map.id).set(map);
+    await refreshMindMapListEntries();
+
+    state.mindMap = normalizeMindMap(map, map.id);
+    state.mindMapSelectedId = state.mindMap.selected_node_id;
+    state.mindMapLoaded = true;
+    state.mindMapCentered = false;
+    clearMindMapUndoStack();
+    closeMobileMenu();
+    closeTemplatesPanel();
+    hideCtxMenu();
+    hideMediaCtxMenu();
+    if (els.accountMenu) els.accountMenu.hidden = true;
+    els.appShell.hidden = true;
+    els.mindMapOverlay.hidden = false;
+    renderMindMap();
+    centerMindMap();
+    els.mindMapStatus.textContent = `保存済み ${state.mindMap.updated_at}`;
+    showToast("メモをマインドマップに変換しました。");
+  } catch (e) {
+    showToast(e.message);
+  }
+}
+
+async function convertCurrentMindMapToNotes() {
+  try {
+    if (!state.mindMap) {
+      showToast("変換するマインドマップがありません。");
+      return;
+    }
+    if (!state.data) await loadNotes();
+
+    await saveMindMapNow();
+    const root = getMindMapNodes().find(node => node.parent_id === null) ?? getMindMapNodes()[0];
+    if (!root) {
+      showToast("変換できるノードがありません。");
+      return;
+    }
+
+    const tree = buildNoteTreeFromMindMapNode(root);
+    const created = createNotesFromTemplate(tree, null, nextOrderForNewNote(null));
+    await writeNotesBatch(created);
+
+    state.data.notes.push(...created);
+    created.forEach(note => {
+      if (created.some(child => child.parent_id === note.id)) state.expanded.add(note.id);
+    });
+    closeMindMapPanel();
+    selectNote(created[0].id);
+    showToast("マインドマップをメモに変換しました。");
+  } catch (e) {
+    showToast(e.message);
+  }
 }
 
 async function ensureOfficialTemplates(uid) {
@@ -1115,6 +1256,7 @@ function renderEditor() {
     els.checkBtn.classList.remove("active");
     els.checkBtn.title = "チェックを付ける";
     setButtonContent(els.checkBtn, "✓");
+    if (els.noteToMindMapBtn) els.noteToMindMapBtn.disabled = true;
     updateEmptyState();
     updateUndoButton();
     return;
@@ -1123,6 +1265,7 @@ function renderEditor() {
   els.checkBtn.classList.toggle("active", Boolean(note.checked));
   els.checkBtn.title = note.checked ? "チェックを外す" : "チェックを付ける";
   setButtonContent(els.checkBtn, "✓");
+  if (els.noteToMindMapBtn) els.noteToMindMapBtn.disabled = false;
   els.contentInput.dataset.placeholder = "ここにメモを書いてください";
   els.contentInput.contentEditable = "true";
   els.titleInput.placeholder = "タイトル";
@@ -2394,6 +2537,7 @@ function renderMindMap() {
   if (els.mindMapAddChildBtn) els.mindMapAddChildBtn.disabled = !selected;
   if (els.mindMapAlignChildrenBtn) els.mindMapAlignChildrenBtn.disabled = !alignTarget.parent || alignTarget.nodes.length < 2;
   if (els.mindMapDeleteNodeBtn) els.mindMapDeleteNodeBtn.disabled = !selected || selected.parent_id === null;
+  if (els.mindMapToNoteBtn) els.mindMapToNoteBtn.disabled = visibleNodes.length === 0;
   updateMindMapUndoButton();
 
   els.mindMapLinks.innerHTML = "";
@@ -3372,6 +3516,7 @@ els.mindMapAddChildBtn?.addEventListener("click", () => addMindMapNode(state.min
 els.mindMapAlignChildrenBtn?.addEventListener("click", alignMindMapSiblingNodes);
 els.mindMapDeleteNodeBtn?.addEventListener("click", deleteSelectedMindMapNode);
 els.mindMapUndoBtn.addEventListener("click", undoMindMapLastChange);
+els.mindMapToNoteBtn?.addEventListener("click", convertCurrentMindMapToNotes);
 els.mindMapContextMenu.addEventListener("click", async e => {
   const colorToggle = e.target.closest("[data-mindmap-context-color-toggle]");
   if (colorToggle) {
@@ -4676,6 +4821,7 @@ if (mobileMenuMql.addEventListener) {
 }
 
 els.titleInput.addEventListener("input", scheduleSave);
+els.noteToMindMapBtn?.addEventListener("click", convertSelectedNoteToMindMap);
 els.checkBtn.addEventListener("click", () => {
   if (!state.selectedId) { showToast("先にメモを選択してください。"); return; }
   toggleCheckedNote(state.selectedId);
