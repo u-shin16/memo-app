@@ -91,49 +91,76 @@
           <button id="checkBtn" class="btn ghost check-toggle-btn" title="チェックを付ける">
             <span class="btn-icon" aria-hidden="true">✓</span>
           </button>
-          <button id="memoFormatToggleBtn" class="btn ghost" type="button" title="文字の色・書式を変更" aria-label="文字の色・書式を変更" aria-expanded="false" aria-controls="memoFormatBar">
-            <span class="btn-icon" aria-hidden="true">A</span>
-            <span class="btn-label">文字</span>
-          </button>
-          <button id="noteToMindMapBtn" class="btn ghost" title="選択中のメモをマインドマップに変換">
-            <span class="btn-icon" aria-hidden="true">⇄</span>
-            <span class="btn-label">マップ化</span>
-          </button>
           <button id="addChildBtn" class="btn" title="選択中のメモに子メモを追加">
             <span class="btn-icon" aria-hidden="true">＋</span>
             <span class="btn-label">メモ追加</span>
           </button>
-          <button id="mediaBtn" class="btn ghost media-add-btn" title="画像・動画を添付（またはドラッグ＆ドロップ）">
-            <span class="btn-icon" aria-hidden="true">📎</span>
-            <span class="btn-label">画像/動画添付</span>
-          </button>
-          <button id="deleteBtn" class="btn danger" title="選択中のメモを削除">
-            <span class="btn-icon" aria-hidden="true">🗑</span>
-            <span class="btn-label">削除</span>
+          <button id="memoSettingsBtn" class="btn ghost settings-trigger-btn" type="button" title="メモの設定とその他の操作" aria-label="メモの設定とその他の操作" aria-haspopup="dialog" aria-expanded="false" aria-controls="memoSettingsPanel">
+            <span class="btn-icon" aria-hidden="true">⚙</span>
+            <span class="btn-label">設定</span>
           </button>
         </div>
       </section>
+
+      <div id="memoSettingsPanel" class="memo-settings-panel" role="dialog" aria-label="メモ設定" hidden>
+        <div class="settings-panel-head">
+          <p class="settings-panel-title">メモ設定</p>
+          <button id="memoSettingsClose" class="settings-panel-close" type="button" title="閉じる" aria-label="メモ設定を閉じる">×</button>
+        </div>
+
+        <div class="settings-section">
+          <p class="settings-section-title">編集</p>
+          <div class="settings-action-grid">
+            <button id="memoFormatToggleBtn" class="settings-action-btn" type="button" title="文字の色・書式を変更" aria-label="文字の色・書式を変更" aria-expanded="false" aria-controls="memoFormatBar">
+              <span class="btn-icon" aria-hidden="true">A</span>
+              <span class="btn-label">文字の書式</span>
+            </button>
+            <button id="mediaBtn" class="settings-action-btn media-add-btn" title="画像・動画を添付（またはドラッグ＆ドロップ）">
+              <span class="btn-icon" aria-hidden="true">📎</span>
+              <span class="btn-label">画像・動画</span>
+            </button>
+            <button id="largeEditorBtn" class="settings-action-btn large-editor-btn" type="button" title="大画面でメモを編集" aria-label="大画面でメモを編集" aria-pressed="false">
+              <span class="btn-icon" aria-hidden="true">⛶</span>
+              <span class="btn-label">大画面</span>
+            </button>
+          </div>
+
+          <section id="memoFormatBar" class="memo-format-bar" aria-label="文字の書式" hidden>
+            <div class="memo-color-control">
+              <button id="memoTextColorBtn" class="memo-format-btn memo-color-btn" type="button" title="文字色を変更" aria-label="文字色を変更" aria-expanded="false" aria-controls="memoTextColorPalette">
+                <span class="memo-color-current" aria-hidden="true"></span>
+                <span id="memoTextColorLabel" class="btn-label">黒</span>
+              </button>
+              <div id="memoTextColorPalette" class="memo-color-palette" hidden></div>
+            </div>
+            <button id="memoStrikeBtn" class="memo-format-btn" type="button" title="選択した文字に横線を引く" aria-label="選択した文字に横線を引く">
+              <span class="btn-icon memo-strike-icon" aria-hidden="true">S</span>
+            </button>
+            <button id="memoSubheadingBtn" class="memo-format-btn memo-heading-btn" type="button" title="選択した文字を小見出しにする" aria-label="選択した文字を小見出しにする">
+              <span class="btn-label">小見出し</span>
+            </button>
+            <button id="memoHeadingBtn" class="memo-format-btn memo-heading-btn" type="button" title="選択した文字を見出しにする" aria-label="選択した文字を見出しにする">
+              <span class="btn-label">見出し</span>
+            </button>
+          </section>
+        </div>
+
+        <div class="settings-section">
+          <p class="settings-section-title">その他の操作</p>
+          <div class="settings-action-grid">
+            <button id="noteToMindMapBtn" class="settings-action-btn" title="選択中のメモをマインドマップに変換">
+              <span class="btn-icon" aria-hidden="true">⇄</span>
+              <span class="btn-label">マップ化</span>
+            </button>
+            <button id="deleteBtn" class="settings-action-btn danger" title="選択中のメモを削除">
+              <span class="btn-icon" aria-hidden="true">🗑</span>
+              <span class="btn-label">削除</span>
+            </button>
+          </div>
+        </div>
+      </div>
 
       <section id="selectedInfo" class="selected-info"></section>
-
-      <section id="memoFormatBar" class="memo-format-bar" aria-label="文字の書式" hidden>
-        <div class="memo-color-control">
-          <button id="memoTextColorBtn" class="memo-format-btn memo-color-btn" type="button" title="文字色を変更" aria-label="文字色を変更" aria-expanded="false" aria-controls="memoTextColorPalette">
-            <span class="memo-color-current" aria-hidden="true"></span>
-            <span id="memoTextColorLabel" class="btn-label">黒</span>
-          </button>
-          <div id="memoTextColorPalette" class="memo-color-palette" hidden></div>
-        </div>
-        <button id="memoStrikeBtn" class="memo-format-btn" type="button" title="選択した文字に横線を引く" aria-label="選択した文字に横線を引く">
-          <span class="btn-icon memo-strike-icon" aria-hidden="true">S</span>
-        </button>
-        <button id="memoSubheadingBtn" class="memo-format-btn memo-heading-btn" type="button" title="選択した文字を小見出しにする" aria-label="選択した文字を小見出しにする">
-          <span class="btn-label">小見出し</span>
-        </button>
-        <button id="memoHeadingBtn" class="memo-format-btn memo-heading-btn" type="button" title="選択した文字を見出しにする" aria-label="選択した文字を見出しにする">
-          <span class="btn-label">見出し</span>
-        </button>
-      </section>
 
       <div id="contentInput"
            class="content-input is-empty"
@@ -238,6 +265,30 @@
     </div>
   </div>
 
+  <!-- 鍵付きメモのパスワード確認 -->
+  <div id="noteLockOverlay" class="note-lock-overlay" hidden>
+    <form id="noteLockForm" class="note-lock-dialog" role="dialog" aria-modal="true" aria-labelledby="noteLockTitle">
+      <p class="auth-eyebrow">Protected Memo</p>
+      <h2 id="noteLockTitle">鍵付きメモ</h2>
+      <p id="noteLockMessage" class="note-lock-message"></p>
+
+      <label class="auth-field">
+        <span>アカウントのパスワード</span>
+        <input id="noteLockPassword" type="password" autocomplete="current-password" required placeholder="登録時のパスワード">
+      </label>
+      <label class="auth-remember">
+        <input id="noteLockShowPassword" type="checkbox">
+        <span>パスワードを表示する</span>
+      </label>
+      <p id="noteLockError" class="auth-error" role="alert" hidden></p>
+
+      <div class="note-lock-actions">
+        <button id="noteLockCancel" class="btn ghost" type="button">キャンセル</button>
+        <button id="noteLockSubmit" class="btn" type="submit">開く</button>
+      </div>
+    </form>
+  </div>
+
   <!-- メディア右クリックメニュー -->
   <div id="mediaContextMenu" class="context-menu" hidden>
     <!-- 画像のみ表示（動画では hidden） -->
@@ -317,29 +368,147 @@
           <span class="btn-icon" aria-hidden="true">🗂️</span>
           <span class="btn-label">一覧</span>
         </button>
-        <div class="mindmap-title-wrap">
-          <p class="mindmap-eyebrow">Mind Map</p>
-          <input id="mindMapTitleInput" class="mindmap-title-input" type="text" maxlength="80" placeholder="マインドマップ名">
-        </div>
+        <div class="mindmap-head-spacer" aria-hidden="true"></div>
         <div class="mindmap-head-actions">
+          <button id="mindMapSettingsBtn" class="mindmap-tool-btn" type="button" title="マインドマップの設定とその他の操作" aria-label="マインドマップの設定とその他の操作" aria-haspopup="dialog" aria-expanded="false" aria-controls="mindMapSettingsPanel">
+            <span class="btn-icon" aria-hidden="true">⚙</span>
+            <span class="btn-label">設定</span>
+          </button>
+          <button id="mindMapNodeSettingsBtn" class="mindmap-tool-btn" type="button" title="選択中のノードを編集" aria-label="選択中のノードを編集" aria-haspopup="dialog" aria-expanded="false" aria-controls="mindMapNodeSettingsPanel">
+            <span class="btn-icon" aria-hidden="true">◇</span>
+            <span class="btn-label">ノード</span>
+          </button>
           <button id="mindMapUndoBtn" class="mindmap-tool-btn" type="button" title="一つ前に戻る（Ctrl / ⌘ + Z）" disabled>
             <span class="btn-icon" aria-hidden="true">↶</span>
             <span class="btn-label">戻す</span>
           </button>
-          <button id="mindMapToNoteBtn" class="mindmap-tool-btn" type="button" title="現在のマインドマップをメモに変換">
-            <span class="btn-icon" aria-hidden="true">⇄</span>
-            <span class="btn-label">メモ化</span>
-          </button>
-          <button id="mindMapNewBtn" class="mindmap-tool-btn" type="button" title="新規マップ">
-            <span class="btn-icon" aria-hidden="true">＋</span>
-            <span class="btn-label">新規マップ</span>
-          </button>
         </div>
       </header>
+
+      <div id="mindMapSettingsPanel" class="mindmap-settings-panel" role="dialog" aria-label="マインドマップ設定" hidden>
+        <div class="mindmap-node-settings-head">
+          <p class="mindmap-node-settings-title">設定</p>
+          <button id="mindMapSettingsClose" class="mindmap-node-settings-close" type="button" title="閉じる" aria-label="設定を閉じる">×</button>
+        </div>
+
+        <div class="mindmap-settings-list">
+          <div class="mindmap-setting-row">
+            <div class="mindmap-setting-copy">
+              <strong>メモを表示</strong>
+              <span>ノードにマウスを重ねたときにメモを表示します</span>
+            </div>
+            <button id="mindMapMemoPreviewToggle" class="mindmap-setting-toggle mindmap-preview-toggle" type="button" role="switch" aria-checked="true" title="メモプレビューをオフにする">
+              <span class="mindmap-preview-switch" aria-hidden="true"><span class="mindmap-preview-knob"></span></span>
+              <span class="mindmap-setting-state">オン</span>
+            </button>
+          </div>
+
+          <div class="mindmap-setting-row">
+            <div class="mindmap-setting-copy">
+              <strong>発表モード</strong>
+              <span>編集を停止し、子ノードの表示切替だけを行えます</span>
+            </div>
+            <button id="mindMapPresentationToggle" class="mindmap-setting-toggle mindmap-preview-toggle" type="button" role="switch" aria-checked="false" title="発表モードをオンにする">
+              <span class="mindmap-preview-switch" aria-hidden="true"><span class="mindmap-preview-knob"></span></span>
+              <span class="mindmap-setting-state">オフ</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <p class="settings-section-title">マップ操作</p>
+          <div class="settings-action-grid">
+            <button id="mindMapLargeBtn" class="settings-action-btn mindmap-large-btn" type="button" title="大画面でマインドマップを表示" aria-label="大画面でマインドマップを表示" aria-pressed="false">
+              <span class="btn-icon" aria-hidden="true">⛶</span>
+              <span class="btn-label">大画面</span>
+            </button>
+            <button id="mindMapToNoteBtn" class="settings-action-btn" type="button" title="現在のマインドマップをメモに変換">
+              <span class="btn-icon" aria-hidden="true">⇄</span>
+              <span class="btn-label">メモ化</span>
+            </button>
+            <button id="mindMapNewBtn" class="settings-action-btn" type="button" title="新規マップ">
+              <span class="btn-icon" aria-hidden="true">＋</span>
+              <span class="btn-label">新規マップ</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div id="mindMapNodeSettingsPanel" class="mindmap-node-settings-panel" role="dialog" aria-label="選択中のノードを編集" hidden>
+        <div class="mindmap-node-settings-head">
+          <p class="mindmap-node-settings-title">ノード設定</p>
+          <button id="mindMapNodeSettingsClose" class="mindmap-node-settings-close" type="button" title="閉じる" aria-label="ノード設定を閉じる">×</button>
+        </div>
+
+        <label class="mindmap-field mindmap-node-title-field">
+          <span>選択ノード</span>
+          <input id="mindMapNodeTitleInput" type="text" maxlength="80" placeholder="ノード名">
+        </label>
+
+        <div class="mindmap-field mindmap-node-memo-field">
+          <div class="mindmap-node-memo-head">
+            <label for="mindMapNodeMemoInput">メモ</label>
+            <button id="mindMapMemoLargeBtn" class="mindmap-memo-large-btn" type="button" title="大画面でメモを編集" aria-label="大画面でメモを編集" aria-pressed="false" disabled>
+              <span class="btn-icon" aria-hidden="true">⛶</span>
+              <span class="btn-label">大画面</span>
+            </button>
+          </div>
+          <textarea id="mindMapNodeMemoInput" placeholder="ノードにメモを追加..." disabled></textarea>
+        </div>
+
+        <div class="mindmap-color-panel" aria-label="色設定">
+          <span class="mindmap-section-label">色</span>
+          <div class="mindmap-color-rows">
+            <div class="mindmap-color-row">
+              <div id="mindMapNodeFillColorButton" class="mindmap-color-current" role="group" aria-label="塗り色を選ぶ">
+                <button class="mindmap-color-current-trigger" type="button" aria-expanded="false" aria-controls="mindMapNodeFillPalette">
+                  <span class="mindmap-color-current-swatch" aria-hidden="true"></span>
+                  <span class="mindmap-color-current-label">塗り</span>
+                  <span class="mindmap-color-current-caret" aria-hidden="true">▾</span>
+                </button>
+              </div>
+              <input id="mindMapNodeFillColorInput" class="mindmap-color-input" type="color" value="#ffffff" aria-label="ノードの塗り色">
+            </div>
+            <div class="mindmap-color-row">
+              <div id="mindMapNodeBorderColorButton" class="mindmap-color-current" role="group" aria-label="枠色を選ぶ">
+                <button class="mindmap-color-current-trigger" type="button" aria-expanded="false" aria-controls="mindMapNodeBorderPalette">
+                  <span class="mindmap-color-current-swatch" aria-hidden="true"></span>
+                  <span class="mindmap-color-current-label">枠</span>
+                  <span class="mindmap-color-current-caret" aria-hidden="true">▾</span>
+                </button>
+              </div>
+              <input id="mindMapNodeBorderColorInput" class="mindmap-color-input" type="color" value="#3b82f6" aria-label="ノードの枠色">
+            </div>
+            <div class="mindmap-color-row">
+              <div id="mindMapLinkColorButton" class="mindmap-color-current" role="group" aria-label="線色を選ぶ">
+                <button class="mindmap-color-current-trigger" type="button" aria-expanded="false" aria-controls="mindMapLinkPalette">
+                  <span class="mindmap-color-current-swatch" aria-hidden="true"></span>
+                  <span class="mindmap-color-current-label">線</span>
+                  <span class="mindmap-color-current-caret" aria-hidden="true">▾</span>
+                </button>
+              </div>
+              <input id="mindMapLinkColorInput" class="mindmap-color-input" type="color" value="#3b82f6" aria-label="ノード間の線色">
+            </div>
+          </div>
+          <div class="mindmap-color-palettes">
+            <div id="mindMapNodeFillPalette" class="mindmap-color-palette" aria-label="塗り色" hidden></div>
+            <div id="mindMapNodeBorderPalette" class="mindmap-color-palette" aria-label="枠色" hidden></div>
+            <div id="mindMapLinkPalette" class="mindmap-color-palette" aria-label="ノード間の線色" hidden></div>
+          </div>
+        </div>
+      </div>
 
       <div id="mindMapListPanel" class="context-menu mindmap-list-panel" hidden>
         <p class="mindmap-list-header">マインドマップ一覧</p>
         <ul id="mindMapListItems" class="mindmap-list-items"></ul>
+      </div>
+
+      <div id="mindMapExtraLinkContextMenu" class="context-menu" hidden>
+        <button class="ctx-item ctx-danger" data-extra-link-action="delete">🗑　接続を削除</button>
+      </div>
+
+      <div id="mindMapCanvasContextMenu" class="context-menu" hidden>
+        <button class="ctx-item" data-canvas-action="add-root-child">＋　新規親ノード</button>
       </div>
 
       <div id="mindMapListContextMenu" class="context-menu" hidden>
@@ -351,6 +520,7 @@
         <button class="ctx-item" data-mindmap-action="add-child">＋　子ノードを追加</button>
         <button class="ctx-item" data-mindmap-action="convert-note">⇄　メモに変換</button>
         <button class="ctx-item" data-mindmap-action="toggle-children">▾　子を隠す</button>
+        <button class="ctx-item" data-mindmap-action="collapse-subtree">▾▾　配下をすべて折りたたむ</button>
         <button class="ctx-item" data-mindmap-action="align">↕　同階層を整列</button>
         <button class="ctx-item" data-mindmap-action="undo">↶　戻す</button>
         <button class="ctx-item" data-mindmap-action="center">◎　中央に戻す</button>
@@ -390,64 +560,59 @@
         </div>
       </div>
 
+      <div id="mindMapTemplatesPanel" class="mindmap-templates-panel" hidden>
+        <div class="mindmap-templates-dialog">
+          <div class="templates-head">
+            <p class="templates-title">テンプレート</p>
+            <button id="mindMapTemplatesClose" class="templates-close" title="閉じる" aria-label="閉じる">
+              <span class="btn-icon" aria-hidden="true">×</span>
+            </button>
+          </div>
+          <div class="templates-section">
+            <p class="templates-section-title">現在のマップを保存</p>
+            <div class="templates-save-row">
+              <input id="mindMapTemplateNameInput" type="text" placeholder="テンプレート名を入力">
+              <button id="mindMapTemplateSaveBtn" class="btn">
+                <span class="btn-icon" aria-hidden="true">＋</span>
+                <span class="btn-label">保存</span>
+              </button>
+            </div>
+          </div>
+          <div class="ctx-sep"></div>
+          <div class="templates-section">
+            <p class="templates-section-title">テンプレートを適用</p>
+            <div id="mindMapTemplatesList" class="templates-list"></div>
+          </div>
+        </div>
+      </div>
+
       <div class="mindmap-body">
         <aside class="mindmap-tools">
-          <div class="mindmap-sidebar-actions">
-            <button id="mindMapSideNewBtn" class="icon-btn" type="button" title="新規マップ" aria-label="新規マップ">
-              <span class="btn-icon" aria-hidden="true">＋</span>
-              <span class="btn-label">新規マップ</span>
-            </button>
-            <button id="mindMapAccountBtn" class="icon-btn" type="button" title="アカウントメニューを開く" aria-label="アカウントメニューを開く">
-              <span class="btn-icon" aria-hidden="true">👤</span>
-              <span class="btn-label">アカウント</span>
-            </button>
+          <div class="brand">
+            <div>
+              <p class="eyebrow">Hierarchical Notes</p>
+              <h1>MusubiMemo</h1>
+            </div>
+            <div class="mindmap-sidebar-actions">
+              <button id="mindMapSideNewBtn" class="icon-btn" type="button" title="新規マップ" aria-label="新規マップ">
+                <span class="btn-icon" aria-hidden="true">＋</span>
+                <span class="btn-label">新規マップ</span>
+              </button>
+              <button id="mindMapTemplateBtn" class="icon-btn" type="button" title="テンプレートを開く" aria-label="テンプレートを開く">
+                <span class="btn-icon" aria-hidden="true">▣</span>
+                <span class="btn-label">テンプレート</span>
+              </button>
+              <button id="mindMapAccountBtn" class="icon-btn" type="button" title="アカウントメニューを開く" aria-label="アカウントメニューを開く">
+                <span class="btn-icon" aria-hidden="true">👤</span>
+                <span class="btn-label">アカウント</span>
+              </button>
+            </div>
           </div>
 
           <label class="mindmap-field">
-            <span>選択ノード</span>
-            <input id="mindMapNodeTitleInput" type="text" maxlength="80" placeholder="ノード名">
+            <span>マップ名</span>
+            <input id="mindMapTitleInput" type="text" maxlength="80" placeholder="マインドマップ名">
           </label>
-
-          <div class="mindmap-color-panel" aria-label="色設定">
-            <span class="mindmap-section-label">色</span>
-            <div class="mindmap-color-rows">
-              <div class="mindmap-color-row">
-                <div id="mindMapNodeFillColorButton" class="mindmap-color-current" role="group" aria-label="塗り色を選ぶ">
-                  <button class="mindmap-color-current-trigger" type="button" aria-expanded="false" aria-controls="mindMapNodeFillPalette">
-                    <span class="mindmap-color-current-swatch" aria-hidden="true"></span>
-                    <span class="mindmap-color-current-label">塗り</span>
-                    <span class="mindmap-color-current-caret" aria-hidden="true">▾</span>
-                  </button>
-                </div>
-                <input id="mindMapNodeFillColorInput" class="mindmap-color-input" type="color" value="#ffffff" aria-label="ノードの塗り色">
-              </div>
-              <div class="mindmap-color-row">
-                <div id="mindMapNodeBorderColorButton" class="mindmap-color-current" role="group" aria-label="枠色を選ぶ">
-                  <button class="mindmap-color-current-trigger" type="button" aria-expanded="false" aria-controls="mindMapNodeBorderPalette">
-                    <span class="mindmap-color-current-swatch" aria-hidden="true"></span>
-                    <span class="mindmap-color-current-label">枠</span>
-                    <span class="mindmap-color-current-caret" aria-hidden="true">▾</span>
-                  </button>
-                </div>
-                <input id="mindMapNodeBorderColorInput" class="mindmap-color-input" type="color" value="#3b82f6" aria-label="ノードの枠色">
-              </div>
-              <div class="mindmap-color-row">
-                <div id="mindMapLinkColorButton" class="mindmap-color-current" role="group" aria-label="線色を選ぶ">
-                  <button class="mindmap-color-current-trigger" type="button" aria-expanded="false" aria-controls="mindMapLinkPalette">
-                    <span class="mindmap-color-current-swatch" aria-hidden="true"></span>
-                    <span class="mindmap-color-current-label">線</span>
-                    <span class="mindmap-color-current-caret" aria-hidden="true">▾</span>
-                  </button>
-                </div>
-                <input id="mindMapLinkColorInput" class="mindmap-color-input" type="color" value="#3b82f6" aria-label="ノード間の線色">
-              </div>
-            </div>
-            <div class="mindmap-color-palettes">
-              <div id="mindMapNodeFillPalette" class="mindmap-color-palette" aria-label="塗り色" hidden></div>
-              <div id="mindMapNodeBorderPalette" class="mindmap-color-palette" aria-label="枠色" hidden></div>
-              <div id="mindMapLinkPalette" class="mindmap-color-palette" aria-label="ノード間の線色" hidden></div>
-            </div>
-          </div>
 
           <div class="mindmap-zoom-row">
             <button id="mindMapZoomOutBtn" class="mindmap-icon-btn" type="button" title="縮小" aria-label="縮小">－</button>
@@ -457,6 +622,8 @@
 
           <p id="mindMapStatus" class="mindmap-status">準備中...</p>
         </aside>
+
+        <div id="mindMapMemoTooltip" class="mindmap-memo-tooltip" hidden></div>
 
         <div id="mindMapCanvas" class="mindmap-canvas">
           <div id="mindMapScene" class="mindmap-scene">
@@ -479,6 +646,8 @@
     <button class="ctx-item" data-action="toggle-pin">📌　ピン留め</button>
     <button class="ctx-item" data-action="move-sibling-top">↑　最上位へ移動</button>
     <button class="ctx-item" data-action="move-sibling-bottom">↓　最下位へ移動</button>
+    <button class="ctx-item" data-action="toggle-lock">🔒　鍵をかける</button>
+    <button class="ctx-item" data-action="relock-note" hidden>🔒　再ロック</button>
     <div class="ctx-sep"></div>
     <button class="ctx-item ctx-danger" data-action="delete">🗑　削除</button>
   </div>
