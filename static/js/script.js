@@ -58,8 +58,12 @@ let _isMindMapNodeTitleComposing = false;
 
 const els = {
   sidebar:          document.getElementById("sidebar"),
-  mobileMenuBtn:   document.getElementById("mobileMenuBtn"),
+  mobileMenuBtn:      document.getElementById("mobileMenuBtn"),
+  noteListBtn:        document.getElementById("noteListBtn"),
+  noteListPanel:      document.getElementById("noteListPanel"),
+  noteListItems:      document.getElementById("noteListItems"),
   mobileMenuBackdrop: document.getElementById("mobileMenuBackdrop"),
+  noteHead:           document.querySelector(".note-head"),
   tree:             document.getElementById("tree"),
   noteCount:        document.getElementById("noteCount"),
   titleInput:       document.getElementById("titleInput"),
@@ -102,6 +106,13 @@ const els = {
   mindMapLargeBtn:  document.getElementById("mindMapLargeBtn"),
   mindMapSideNewBtn: document.getElementById("mindMapSideNewBtn"),
   mindMapAccountBtn: document.getElementById("mindMapAccountBtn"),
+  mindMapAiBtn:          document.getElementById("mindMapAiBtn"),
+  mindMapAiPanel:        document.getElementById("mindMapAiPanel"),
+  mindMapAiClose:        document.getElementById("mindMapAiClose"),
+  mindMapAiMapName:      document.getElementById("mindMapAiMapName"),
+  mindMapAiPrompt:       document.getElementById("mindMapAiPrompt"),
+  mindMapAiGenerateBtn:  document.getElementById("mindMapAiGenerateBtn"),
+  mindMapAiError:        document.getElementById("mindMapAiError"),
   mindMapAddChildBtn: document.getElementById("mindMapAddChildBtn"),
   mindMapAlignChildrenBtn: document.getElementById("mindMapAlignChildrenBtn"),
   mindMapDeleteNodeBtn: document.getElementById("mindMapDeleteNodeBtn"),
@@ -134,6 +145,13 @@ const els = {
   templateNameInput: document.getElementById("templateNameInput"),
   templateSaveBtn:  document.getElementById("templateSaveBtn"),
   undoBtn:          document.getElementById("undoBtn"),
+  noteAiBtn:        document.getElementById("noteAiBtn"),
+  noteAiPanel:      document.getElementById("noteAiPanel"),
+  noteAiClose:      document.getElementById("noteAiClose"),
+  noteAiTitle:      document.getElementById("noteAiTitle"),
+  noteAiPrompt:     document.getElementById("noteAiPrompt"),
+  noteAiGenerateBtn: document.getElementById("noteAiGenerateBtn"),
+  noteAiError:      document.getElementById("noteAiError"),
   checkBtn:         document.getElementById("checkBtn"),
   memoSettingsBtn:  document.getElementById("memoSettingsBtn"),
   memoSettingsPanel: document.getElementById("memoSettingsPanel"),
@@ -147,7 +165,6 @@ const els = {
   memoStrikeBtn:    document.getElementById("memoStrikeBtn"),
   memoSubheadingBtn: document.getElementById("memoSubheadingBtn"),
   memoHeadingBtn:   document.getElementById("memoHeadingBtn"),
-  addChildBtn:      document.getElementById("addChildBtn"),
   mediaBtn:         document.getElementById("mediaBtn"),
   mediaInput:       document.getElementById("mediaInput"),
   deleteBtn:        document.getElementById("deleteBtn"),
@@ -249,6 +266,13 @@ function isMobileMenuLayout() {
   return mobileMenuMql.matches;
 }
 
+function updateNoteListButton(open) {
+  const isOpen = Boolean(open);
+  els.noteListBtn?.setAttribute("aria-expanded", String(isOpen));
+  els.noteListBtn?.setAttribute("aria-label", isOpen ? "親メモ一覧を閉じる" : "親メモ一覧を開く");
+  if (els.noteListBtn) els.noteListBtn.title = isOpen ? "親メモ一覧を閉じる" : "親メモ一覧を開く";
+}
+
 function setMobileMenuOpen(open) {
   const shouldOpen = Boolean(open) && isMobileMenuLayout();
   els.appShell.classList.toggle("mobile-menu-open", shouldOpen);
@@ -273,8 +297,15 @@ function closeMobileMenu() {
   setMobileMenuOpen(false);
 }
 
+function syncNoteHeadHeight() {
+  if (!els.noteHead || !els.appShell) return;
+  const height = els.noteHead.getBoundingClientRect().height;
+  if (height > 0) els.appShell.style.setProperty("--note-head-height", `${height}px`);
+}
+
 function setLargeEditorOpen(open) {
   const shouldOpen = Boolean(open) && Boolean(getSelectedNote());
+  if (shouldOpen) syncNoteHeadHeight();
   els.editorArea.classList.toggle("is-large-editor", shouldOpen);
   document.body.classList.toggle("has-large-editor-open", shouldOpen);
   els.largeEditorBtn.setAttribute("aria-pressed", String(shouldOpen));
@@ -1554,6 +1585,10 @@ function positionMemoFormatPanel() {
 
 function setMemoFormatPanelOpen(open) {
   if (!els.memoFormatBar || !els.memoFormatToggleBtn || els.memoFormatToggleBtn.disabled) return;
+  if (open) {
+    closeMemoSettingsPanel();
+    closeNoteListPanel();
+  }
   els.memoFormatBar.hidden = !open;
   els.memoFormatToggleBtn.classList.toggle("active", open);
   els.memoFormatToggleBtn.setAttribute("aria-expanded", String(open));
@@ -1576,6 +1611,8 @@ function closeMemoFormatPanel() {
 
 function openMemoSettingsPanel() {
   if (!els.memoSettingsPanel || !els.memoSettingsBtn) return;
+  closeMemoFormatPanel();
+  closeNoteListPanel();
   hideCtxMenu();
   hideMediaCtxMenu();
   if (els.accountMenu) els.accountMenu.hidden = true;
@@ -1997,6 +2034,172 @@ function renderTree() {
   els.tree.appendChild(createTreeInsertZone(null, null));
 }
 
+function getRootNotesForList() {
+  return getNotes()
+    .filter(note => note.parent_id === null)
+    .sort((a, b) => String(b.updated_at ?? "").localeCompare(String(a.updated_at ?? "")));
+}
+
+function getSelectedRootNoteId() {
+  return state.selectedId ? (getNoteAncestorChain(state.selectedId)[0]?.id ?? null) : null;
+}
+
+function renderNoteList() {
+  if (!els.noteListItems) return;
+  els.noteListItems.innerHTML = "";
+  const roots = getRootNotesForList();
+  const activeRootId = getSelectedRootNoteId();
+
+  if (roots.length === 0) {
+    const empty = document.createElement("li");
+    empty.className = "note-list-empty";
+    empty.textContent = "親メモはまだありません。";
+    els.noteListItems.appendChild(empty);
+    return;
+  }
+
+  roots.forEach(note => {
+    const item = document.createElement("li");
+    item.className = `mindmap-list-item${note.id === activeRootId ? " is-active" : ""}`;
+    item.dataset.id = note.id;
+
+    const openBtn = document.createElement("button");
+    openBtn.type = "button";
+    openBtn.className = "mindmap-list-open";
+    openBtn.dataset.action = "open";
+
+    const title = document.createElement("span");
+    title.className = "mindmap-list-title";
+    title.textContent = note.title || "無題";
+    openBtn.appendChild(title);
+
+    const date = document.createElement("span");
+    date.className = "mindmap-list-date";
+    date.textContent = formatListDate(note.updated_at);
+    openBtn.appendChild(date);
+    item.appendChild(openBtn);
+
+    const actions = document.createElement("div");
+    actions.className = "mindmap-list-actions";
+
+    const renameBtn = document.createElement("button");
+    renameBtn.type = "button";
+    renameBtn.className = "mindmap-list-icon-btn";
+    renameBtn.dataset.action = "rename";
+    renameBtn.title = "名前を変更";
+    renameBtn.setAttribute("aria-label", `「${note.title || "無題"}」の名前を変更`);
+    renameBtn.textContent = "✏️";
+    actions.appendChild(renameBtn);
+
+    const deleteBtn = document.createElement("button");
+    deleteBtn.type = "button";
+    deleteBtn.className = "mindmap-list-icon-btn danger";
+    deleteBtn.dataset.action = "delete";
+    deleteBtn.title = "削除";
+    deleteBtn.setAttribute("aria-label", `「${note.title || "無題"}」を削除`);
+    deleteBtn.textContent = "🗑";
+    actions.appendChild(deleteBtn);
+
+    item.appendChild(actions);
+    els.noteListItems.appendChild(item);
+  });
+}
+
+function positionNoteListPanel() {
+  if (!els.noteListPanel || !els.noteListBtn || els.noteListPanel.hidden) return;
+  const rect = els.noteListBtn.getBoundingClientRect();
+  const edge = 8;
+  const width = els.noteListPanel.offsetWidth;
+  const left = Math.max(edge, Math.min(rect.left, window.innerWidth - width - edge));
+  els.noteListPanel.style.top = `${rect.bottom + 6}px`;
+  els.noteListPanel.style.left = `${left}px`;
+  els.noteListPanel.style.right = "auto";
+}
+
+function openNoteListPanel() {
+  if (!els.noteListPanel) return;
+  closeMemoFormatPanel();
+  closeMemoSettingsPanel();
+  renderNoteList();
+  els.noteListPanel.hidden = false;
+  updateNoteListButton(true);
+  positionNoteListPanel();
+}
+
+function closeNoteListPanel() {
+  if (!els.noteListPanel) return;
+  els.noteListPanel.hidden = true;
+  updateNoteListButton(false);
+}
+
+async function openRootNoteFromList(noteId) {
+  if (!await ensureNoteAccess(noteId)) return;
+  await saveCurrentEditorNow();
+  selectNote(noteId);
+  closeNoteListPanel();
+}
+
+async function startNoteListRename(noteId) {
+  const note = getNotes().find(item => item.id === noteId);
+  const item = els.noteListItems?.querySelector(`[data-id="${noteId}"]`);
+  if (!note || !item || item.classList.contains("is-editing")) return;
+  if (!await ensureNoteAccess(noteId)) return;
+  const openBtn = item.querySelector(".mindmap-list-open");
+
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "mindmap-list-rename";
+  input.maxLength = 120;
+  input.value = note.title || "無題";
+
+  let finished = false;
+  const finish = async commit => {
+    if (finished) return;
+    finished = true;
+    if (commit) {
+      try {
+        await updateNote(noteId, { title: input.value.trim() || "無題" }, false);
+        renderTree();
+        if (state.selectedId === noteId) renderEditor();
+        renderNoteList();
+        showToast("名前を変更しました。");
+        return;
+      } catch (e) {
+        showToast(e.message);
+      }
+    }
+    item.classList.remove("is-editing");
+    input.remove();
+    openBtn.hidden = false;
+  };
+
+  input.addEventListener("blur", () => { void finish(true); });
+  input.addEventListener("keydown", e => {
+    e.stopPropagation();
+    if (e.key === "Enter") {
+      e.preventDefault();
+      input.blur();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      void finish(false);
+    }
+  });
+
+  item.classList.add("is-editing");
+  openBtn.hidden = true;
+  openBtn.insertAdjacentElement("afterend", input);
+  input.focus();
+  input.select();
+}
+
+async function deleteRootNoteFromList(noteId) {
+  if (!await ensureNoteAccess(noteId)) return;
+  await saveCurrentEditorNow();
+  selectNote(noteId);
+  closeNoteListPanel();
+  await deleteSelectedNote();
+}
+
 function renderNode(note, treeCtx) {
   if (!treeCtx.matches(note)) return null;
 
@@ -2228,6 +2431,61 @@ function renderEditor() {
   els.saveStatus.textContent   = "保存済み";
   updateEmptyState();
   updateUndoButton();
+}
+
+function openNoteAiPanel() {
+  if (els.noteAiTitle)  els.noteAiTitle.value  = "";
+  if (els.noteAiPrompt) els.noteAiPrompt.value = "";
+  if (els.noteAiError)  els.noteAiError.hidden = true;
+  if (els.noteAiGenerateBtn) els.noteAiGenerateBtn.disabled = false;
+  if (els.noteAiPanel) {
+    els.noteAiPanel.hidden = false;
+    els.noteAiTitle?.focus();
+  }
+}
+
+function closeNoteAiPanel() {
+  if (els.noteAiPanel) els.noteAiPanel.hidden = true;
+}
+
+async function generateNoteWithAI() {
+  const prompt = els.noteAiPrompt?.value.trim();
+  if (!prompt) return;
+  const btn   = els.noteAiGenerateBtn;
+  const errEl = els.noteAiError;
+  btn.disabled = true;
+  btn.querySelector(".btn-label").textContent = "生成中...";
+  if (errEl) errEl.hidden = true;
+  try {
+    const res = await fetch("/api/ai-note", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt }),
+    });
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error || "生成に失敗しました");
+    const tree = json.tree;
+    const userTitle = els.noteAiTitle?.value.trim();
+    if (userTitle) tree.title = userTitle;
+    closeNoteAiPanel();
+    const created = createNotesFromTemplate(tree, null, nextOrderForNewNote(null));
+    await writeNotesBatch(created);
+    state.data.notes.push(...created);
+    created.forEach(note => {
+      if (created.some(child => child.parent_id === note.id)) state.expanded.add(note.id);
+    });
+    renderTree();
+    selectNote(created[0].id);
+    showToast("AIメモを生成しました。");
+  } catch (err) {
+    if (errEl) {
+      errEl.textContent = String(err.message || err);
+      errEl.hidden = false;
+    }
+  } finally {
+    btn.disabled = false;
+    btn.querySelector(".btn-label").textContent = "メモを生成";
+  }
 }
 
 function selectNote(id) {
@@ -2799,6 +3057,86 @@ function appendMindMapTemplateItem(template) {
   els.mindMapTemplatesList.appendChild(renderMindMapTemplateItem(template));
 }
 
+function openMindMapAiPanel() {
+  if (isMindMapPresentationMode()) return;
+  hideMindMapCtxMenu();
+  closeMindMapListPanel();
+  closeMindMapTemplatesPanel();
+  if (els.mindMapAiMapName) els.mindMapAiMapName.value = "";
+  if (els.mindMapAiPrompt) els.mindMapAiPrompt.value = "";
+  if (els.mindMapAiError) els.mindMapAiError.hidden = true;
+  if (els.mindMapAiGenerateBtn) els.mindMapAiGenerateBtn.disabled = false;
+  if (els.mindMapAiPanel) {
+    els.mindMapAiPanel.hidden = false;
+    els.mindMapAiPrompt?.focus();
+  }
+}
+
+function closeMindMapAiPanel() {
+  if (els.mindMapAiPanel) els.mindMapAiPanel.hidden = true;
+}
+
+async function generateMindMapWithAI() {
+  const prompt = els.mindMapAiPrompt?.value.trim();
+  if (!prompt) return;
+  const btn = els.mindMapAiGenerateBtn;
+  const errEl = els.mindMapAiError;
+  btn.disabled = true;
+  btn.querySelector(".btn-label").textContent = "生成中...";
+  if (errEl) errEl.hidden = true;
+  try {
+    const res = await fetch("/api/ai-mindmap", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt }),
+    });
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error || "生成に失敗しました");
+    const tree = json.tree;
+    const userTitle = els.mindMapAiMapName?.value.trim();
+    closeMindMapAiPanel();
+    if (state.mindMap) await saveMindMapNow();
+    const nodes = createNodesFromMindMapTree(tree, null, 1000);
+    const ts = nowIso();
+    const map = {
+      id:               makeId(),
+      title:            String(userTitle || tree.title || "AIマインドマップ").slice(0, 80),
+      created_at:       ts,
+      updated_at:       ts,
+      selected_node_id: nodes[0]?.id ?? null,
+      nodes,
+      extra_links:      [],
+    };
+    const previous = state.mindMap;
+    state.mindMap = map;
+    state.mindMapSelectedId = map.selected_node_id;
+    try {
+      await mindMapsCollection().doc(map.id).set(serializeMindMap());
+    } catch (e) {
+      state.mindMap = previous;
+      state.mindMapSelectedId = previous?.selected_node_id ?? null;
+      throw e;
+    }
+    state.mindMapCentered = false;
+    state.mindMapList.unshift({ id: map.id, title: map.title, updated_at: map.updated_at });
+    clearMindMapUndoStack();
+    renderMindMap();
+    centerMindMap();
+    if (els.mindMapStatus) els.mindMapStatus.textContent = `保存済み ${map.updated_at}`;
+    showToast("AIマインドマップを生成しました。");
+  } catch (err) {
+    if (errEl) {
+      errEl.textContent = String(err.message || err);
+      errEl.hidden = false;
+    }
+    btn.disabled = false;
+    btn.querySelector(".btn-label").textContent = "マインドマップを生成";
+    return;
+  }
+  btn.disabled = false;
+  btn.querySelector(".btn-label").textContent = "マインドマップを生成";
+}
+
 function openMindMapTemplatesPanel() {
   if (isMindMapPresentationMode()) return;
   hideMindMapCtxMenu();
@@ -3036,6 +3374,15 @@ els.templatesList.addEventListener("click", e => {
   }
 });
 
+els.mindMapAiBtn?.addEventListener("click", openMindMapAiPanel);
+els.mindMapAiClose?.addEventListener("click", closeMindMapAiPanel);
+els.mindMapAiPanel?.addEventListener("click", e => {
+  if (e.target === els.mindMapAiPanel) closeMindMapAiPanel();
+});
+els.mindMapAiGenerateBtn?.addEventListener("click", generateMindMapWithAI);
+els.mindMapAiPrompt?.addEventListener("keydown", e => {
+  if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); generateMindMapWithAI(); }
+});
 els.mindMapTemplateBtn?.addEventListener("click", openMindMapTemplatesPanel);
 els.mindMapTemplatesClose?.addEventListener("click", closeMindMapTemplatesPanel);
 els.mindMapTemplatesPanel?.addEventListener("click", e => {
@@ -4513,7 +4860,7 @@ async function deleteSelectedMindMapNode() {
   showToast("ノードを削除しました。");
 }
 
-function formatMindMapListDate(iso) {
+function formatListDate(iso) {
   const m = String(iso || "").match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
   return m ? `${m[1]}/${m[2]}/${m[3]} ${m[4]}:${m[5]}` : "";
 }
@@ -4637,7 +4984,7 @@ function startMindMapListRename(id) {
       const titleEl = openBtn.querySelector(".mindmap-list-title");
       if (titleEl) titleEl.textContent = title;
       const dateEl = openBtn.querySelector(".mindmap-list-date");
-      if (dateEl) dateEl.textContent = formatMindMapListDate(entry.updated_at);
+      if (dateEl) dateEl.textContent = formatListDate(entry.updated_at);
       if (state.mindMap?.id === id) {
         state.mindMap.title = title;
         els.mindMapTitleInput.value = title;
@@ -4687,7 +5034,7 @@ function renderMindMapList() {
 
     const date = document.createElement("span");
     date.className = "mindmap-list-date";
-    date.textContent = formatMindMapListDate(entry.updated_at);
+    date.textContent = formatListDate(entry.updated_at);
     openBtn.appendChild(date);
 
     item.appendChild(openBtn);
@@ -4890,6 +5237,7 @@ function closeMindMapPanel() {
   els.appShell.hidden = false;
   closeMindMapListPanel();
   closeMindMapTemplatesPanel();
+  closeMindMapAiPanel();
   hideMindMapCtxMenu();
   if (state.mindMap) saveMindMapNow();
 }
@@ -5544,6 +5892,8 @@ els.mindMapCanvas.addEventListener("pointerup", finishMindMapPan);
 els.mindMapCanvas.addEventListener("pointercancel", finishMindMapPan);
 window.addEventListener("resize", () => {
   if (!els.mindMapOverlay.hidden && !state.mindMapCentered) centerMindMap();
+  if (els.editorArea.classList.contains("is-large-editor")) syncNoteHeadHeight();
+  positionNoteListPanel();
   positionMemoSettingsPanel();
   positionMindMapSettingsPanel();
   positionMindMapNodeSettingsPanel();
@@ -6814,6 +7164,9 @@ document.addEventListener("click", e => {
     els.memoFormatToggleBtn?.contains(e.target)
   );
   if (!clickedMemoFormat) closeMemoFormatPanel();
+  if (!els.noteListPanel?.hidden && !els.noteListPanel.contains(e.target) && !els.noteListBtn?.contains(e.target)) {
+    closeNoteListPanel();
+  }
   const clickedMemoSettings = Boolean(
     els.memoSettingsPanel?.contains(e.target) ||
     els.memoSettingsBtn?.contains(e.target)
@@ -6873,6 +7226,11 @@ document.addEventListener("keydown", e => {
   if (e.key === "Escape" && !els.memoSettingsPanel?.hidden) {
     e.preventDefault();
     closeMemoSettingsPanel();
+    return;
+  }
+  if (e.key === "Escape" && !els.noteListPanel?.hidden) {
+    e.preventDefault();
+    closeNoteListPanel();
     return;
   }
   const mindMapSettingsOpen = !els.mindMapSettingsPanel?.hidden || !els.mindMapNodeSettingsPanel?.hidden;
@@ -6935,18 +7293,40 @@ document.addEventListener("selectionchange", () => {
 
 // ── ボタン / 入力バインド ─────────────────────────────────────────────────────
 
-els.mobileMenuBtn.addEventListener("click", e => {
+els.mobileMenuBtn?.addEventListener("click", e => {
   e.stopPropagation();
   toggleMobileMenu();
+});
+els.noteListBtn?.addEventListener("click", e => {
+  e.stopPropagation();
+  if (els.noteListPanel?.hidden) openNoteListPanel();
+  else closeNoteListPanel();
+});
+els.noteListItems?.addEventListener("click", e => {
+  const item = e.target.closest(".mindmap-list-item");
+  if (!item || item.classList.contains("is-editing")) return;
+  const noteId = item.dataset.id;
+  const action = e.target.closest("[data-action]")?.dataset.action;
+  if (action === "rename") {
+    e.stopPropagation();
+    void startNoteListRename(noteId);
+  } else if (action === "delete") {
+    e.stopPropagation();
+    void deleteRootNoteFromList(noteId);
+  } else if (action === "open") {
+    void openRootNoteFromList(noteId);
+  }
 });
 els.mobileMenuBackdrop.addEventListener("click", closeMobileMenu);
 if (mobileMenuMql.addEventListener) {
   mobileMenuMql.addEventListener("change", e => {
     if (!e.matches) closeMobileMenu();
+    closeNoteListPanel();
   });
 } else {
   mobileMenuMql.addListener(e => {
     if (!e.matches) closeMobileMenu();
+    closeNoteListPanel();
   });
 }
 
@@ -7035,9 +7415,14 @@ els.searchInput.addEventListener("input", renderTree);
 
 els.newRootBtn .addEventListener("click", () => createNote(null));
 els.undoBtn.addEventListener("click", undoLastChange);
-els.addChildBtn.addEventListener("click", () => {
-  if (!state.selectedId) { showToast("先にメモを選択してください。"); return; }
-  createNote(state.selectedId);
+els.noteAiBtn?.addEventListener("click", openNoteAiPanel);
+els.noteAiClose?.addEventListener("click", closeNoteAiPanel);
+els.noteAiPanel?.addEventListener("click", e => {
+  if (e.target === els.noteAiPanel) closeNoteAiPanel();
+});
+els.noteAiGenerateBtn?.addEventListener("click", generateNoteWithAI);
+els.noteAiPrompt?.addEventListener("keydown", e => {
+  if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); generateNoteWithAI(); }
 });
 els.deleteBtn.addEventListener("click", () => {
   closeMemoSettingsPanel();

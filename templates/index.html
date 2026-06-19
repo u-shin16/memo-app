@@ -27,24 +27,57 @@
 </head>
 <body>
   <div class="app-shell" hidden>
-    <button id="mobileMenuBtn"
-            class="mobile-menu-btn"
-            type="button"
-            title="メモ一覧を開く"
-            aria-label="メモ一覧を開く"
-            aria-controls="sidebar"
-            aria-expanded="false">
+    <!-- 旧モバイルメニューボタン（JS参照のため保持・非表示） -->
+    <button id="mobileMenuBtn" class="mobile-menu-btn" type="button" aria-controls="sidebar" aria-expanded="false" hidden>
       <span class="btn-icon mobile-menu-icon" aria-hidden="true">☰</span>
       <span class="mobile-menu-text">メモ</span>
     </button>
-    <div id="mobileMenuBackdrop" class="mobile-menu-backdrop" hidden></div>
 
-    <aside id="sidebar" class="sidebar">
-      <div class="brand">
+    <header class="note-head">
+      <div class="note-nav-btns">
         <button id="mindMapBtn" class="mindmap-switch-btn" type="button" title="マインドマップを開く" aria-label="マインドマップを開く">
           <span class="btn-icon" aria-hidden="true">✣</span>
           <span class="btn-label">マインドマップ</span>
         </button>
+        <button id="noteListBtn" class="mindmap-tool-btn" type="button" title="親メモ一覧を開く" aria-label="親メモ一覧を開く" aria-haspopup="dialog" aria-controls="noteListPanel" aria-expanded="false">
+          <span class="btn-icon" aria-hidden="true">🗂️</span>
+          <span class="btn-label">一覧</span>
+        </button>
+      </div>
+      <div class="note-head-spacer"></div>
+      <div class="note-head-actions">
+        <button id="noteAiBtn" class="mindmap-tool-btn" type="button" title="AIでメモを生成">
+          <span class="btn-icon" aria-hidden="true">✨</span>
+          <span class="btn-label">AI生成</span>
+        </button>
+        <button id="memoSettingsBtn" class="mindmap-tool-btn settings-trigger-btn" type="button" title="メモの設定とその他の操作" aria-label="メモの設定とその他の操作" aria-haspopup="dialog" aria-expanded="false" aria-controls="memoSettingsPanel">
+          <span class="btn-icon" aria-hidden="true">⚙</span>
+          <span class="btn-label">設定</span>
+        </button>
+        <button id="checkBtn" class="mindmap-tool-btn check-toggle-btn" title="チェックを付ける">
+          <span class="btn-icon" aria-hidden="true">✓</span>
+          <span class="btn-label">チェック</span>
+        </button>
+        <button id="memoFormatToggleBtn" class="mindmap-tool-btn memo-format-trigger-btn" type="button" title="文字の書式を変更" aria-label="文字の書式を変更" aria-expanded="false" aria-controls="memoFormatBar">
+          <span class="btn-icon" aria-hidden="true">A</span>
+          <span class="btn-label">文字</span>
+        </button>
+        <button id="undoBtn" class="mindmap-tool-btn undo-btn" title="一つ前に戻る（Ctrl / ⌘ + Z）" disabled>
+          <span class="btn-icon" aria-hidden="true">↶</span>
+          <span class="btn-label">戻す</span>
+        </button>
+      </div>
+    </header>
+
+    <div id="noteListPanel" class="context-menu mindmap-list-panel note-list-panel" role="dialog" aria-label="親メモ一覧" hidden>
+      <p class="mindmap-list-header">親メモ一覧</p>
+      <ul id="noteListItems" class="mindmap-list-items"></ul>
+    </div>
+
+    <div id="mobileMenuBackdrop" class="mobile-menu-backdrop" hidden></div>
+
+    <aside id="sidebar" class="sidebar">
+      <div class="brand">
         <div>
           <p class="eyebrow">Hierarchical Notes</p>
           <h1>MusubiMemo</h1>
@@ -79,28 +112,33 @@
 
     <main class="editor" id="editorArea">
       <section class="editor-top">
-        <div>
-          <p id="breadcrumb" class="breadcrumb">メモを選択するか作成してください</p>
-          <input id="titleInput" class="title-input" placeholder="メモを選択するか作成してください">
-        </div>
-        <div class="actions">
-          <button id="undoBtn" class="btn ghost undo-btn" title="一つ前に戻る（Ctrl / ⌘ + Z）" disabled>
-            <span class="btn-icon" aria-hidden="true">↶</span>
-            <span class="btn-label">戻す</span>
-          </button>
-          <button id="checkBtn" class="btn ghost check-toggle-btn" title="チェックを付ける">
-            <span class="btn-icon" aria-hidden="true">✓</span>
-          </button>
-          <button id="addChildBtn" class="btn" title="選択中のメモに子メモを追加">
-            <span class="btn-icon" aria-hidden="true">＋</span>
-            <span class="btn-label">メモ追加</span>
-          </button>
-          <button id="memoSettingsBtn" class="btn ghost settings-trigger-btn" type="button" title="メモの設定とその他の操作" aria-label="メモの設定とその他の操作" aria-haspopup="dialog" aria-expanded="false" aria-controls="memoSettingsPanel">
-            <span class="btn-icon" aria-hidden="true">⚙</span>
-            <span class="btn-label">設定</span>
-          </button>
-        </div>
+        <p id="breadcrumb" class="breadcrumb">メモを選択するか作成してください</p>
+        <input id="titleInput" class="title-input" placeholder="メモを選択するか作成してください">
       </section>
+
+      <div id="noteAiPanel" class="mindmap-ai-panel note-ai-panel" role="dialog" aria-label="AIメモ生成" hidden>
+        <div class="mindmap-ai-dialog">
+          <div class="mindmap-node-settings-head">
+            <p class="mindmap-node-settings-title">✨ AI メモ生成</p>
+            <button id="noteAiClose" class="mindmap-node-settings-close" type="button" title="閉じる" aria-label="閉じる">×</button>
+          </div>
+          <div class="mindmap-ai-body">
+            <label class="mindmap-field">
+              <span>メモタイトル（省略可）</span>
+              <input id="noteAiTitle" type="text" maxlength="120" placeholder="省略するとAIが自動でつけます">
+            </label>
+            <label class="mindmap-field">
+              <span>テーマや内容を入力</span>
+              <textarea id="noteAiPrompt" rows="4" placeholder="例：Pythonの基礎知識、マーケティング戦略の立て方、健康的な生活習慣..."></textarea>
+            </label>
+            <button id="noteAiGenerateBtn" class="icon-btn mindmap-ai-generate-btn" type="button">
+              <span class="btn-icon" aria-hidden="true">✨</span>
+              <span class="btn-label">メモを生成</span>
+            </button>
+            <p id="noteAiError" class="mindmap-ai-error" hidden></p>
+          </div>
+        </div>
+      </div>
 
       <div id="memoSettingsPanel" class="memo-settings-panel" role="dialog" aria-label="メモ設定" hidden>
         <div class="settings-panel-head">
@@ -111,10 +149,6 @@
         <div class="settings-section">
           <p class="settings-section-title">編集</p>
           <div class="settings-action-grid">
-            <button id="memoFormatToggleBtn" class="settings-action-btn" type="button" title="文字の色・書式を変更" aria-label="文字の色・書式を変更" aria-expanded="false" aria-controls="memoFormatBar">
-              <span class="btn-icon" aria-hidden="true">A</span>
-              <span class="btn-label">文字の書式</span>
-            </button>
             <button id="mediaBtn" class="settings-action-btn media-add-btn" title="画像・動画を添付（またはドラッグ＆ドロップ）">
               <span class="btn-icon" aria-hidden="true">📎</span>
               <span class="btn-label">画像・動画</span>
@@ -125,24 +159,6 @@
             </button>
           </div>
 
-          <section id="memoFormatBar" class="memo-format-bar" aria-label="文字の書式" hidden>
-            <div class="memo-color-control">
-              <button id="memoTextColorBtn" class="memo-format-btn memo-color-btn" type="button" title="文字色を変更" aria-label="文字色を変更" aria-expanded="false" aria-controls="memoTextColorPalette">
-                <span class="memo-color-current" aria-hidden="true"></span>
-                <span id="memoTextColorLabel" class="btn-label">黒</span>
-              </button>
-              <div id="memoTextColorPalette" class="memo-color-palette" hidden></div>
-            </div>
-            <button id="memoStrikeBtn" class="memo-format-btn" type="button" title="選択した文字に横線を引く" aria-label="選択した文字に横線を引く">
-              <span class="btn-icon memo-strike-icon" aria-hidden="true">S</span>
-            </button>
-            <button id="memoSubheadingBtn" class="memo-format-btn memo-heading-btn" type="button" title="選択した文字を小見出しにする" aria-label="選択した文字を小見出しにする">
-              <span class="btn-label">小見出し</span>
-            </button>
-            <button id="memoHeadingBtn" class="memo-format-btn memo-heading-btn" type="button" title="選択した文字を見出しにする" aria-label="選択した文字を見出しにする">
-              <span class="btn-label">見出し</span>
-            </button>
-          </section>
         </div>
 
         <div class="settings-section">
@@ -159,6 +175,25 @@
           </div>
         </div>
       </div>
+
+      <section id="memoFormatBar" class="memo-format-bar" role="dialog" aria-label="文字の書式" hidden>
+        <div class="memo-color-control">
+          <button id="memoTextColorBtn" class="memo-format-btn memo-color-btn" type="button" title="文字色を変更" aria-label="文字色を変更" aria-expanded="false" aria-controls="memoTextColorPalette">
+            <span class="memo-color-current" aria-hidden="true"></span>
+            <span id="memoTextColorLabel" class="btn-label">黒</span>
+          </button>
+          <div id="memoTextColorPalette" class="memo-color-palette" hidden></div>
+        </div>
+        <button id="memoStrikeBtn" class="memo-format-btn" type="button" title="選択した文字に横線を引く" aria-label="選択した文字に横線を引く">
+          <span class="btn-icon memo-strike-icon" aria-hidden="true">S</span>
+        </button>
+        <button id="memoSubheadingBtn" class="memo-format-btn memo-heading-btn" type="button" title="選択した文字を小見出しにする" aria-label="選択した文字を小見出しにする">
+          <span class="btn-label">小見出し</span>
+        </button>
+        <button id="memoHeadingBtn" class="memo-format-btn memo-heading-btn" type="button" title="選択した文字を見出しにする" aria-label="選択した文字を見出しにする">
+          <span class="btn-label">見出し</span>
+        </button>
+      </section>
 
       <section id="selectedInfo" class="selected-info"></section>
 
@@ -370,6 +405,10 @@
         </button>
         <div class="mindmap-head-spacer" aria-hidden="true"></div>
         <div class="mindmap-head-actions">
+          <button id="mindMapAiBtn" class="mindmap-tool-btn" type="button" title="AIでマインドマップを生成" aria-label="AIでマインドマップを生成">
+            <span class="btn-icon" aria-hidden="true">✨</span>
+            <span class="btn-label">AI生成</span>
+          </button>
           <button id="mindMapSettingsBtn" class="mindmap-tool-btn" type="button" title="マインドマップの設定とその他の操作" aria-label="マインドマップの設定とその他の操作" aria-haspopup="dialog" aria-expanded="false" aria-controls="mindMapSettingsPanel">
             <span class="btn-icon" aria-hidden="true">⚙</span>
             <span class="btn-label">設定</span>
@@ -557,6 +596,30 @@
             </button>
           </div>
           <div class="mindmap-context-color-palette is-link-only" id="mindMapLinkContextPalette" hidden></div>
+        </div>
+      </div>
+
+      <div id="mindMapAiPanel" class="mindmap-ai-panel" role="dialog" aria-label="AIマインドマップ生成" hidden>
+        <div class="mindmap-ai-dialog">
+          <div class="mindmap-node-settings-head">
+            <p class="mindmap-node-settings-title">✨ AI マインドマップ生成</p>
+            <button id="mindMapAiClose" class="mindmap-node-settings-close" type="button" title="閉じる" aria-label="閉じる">×</button>
+          </div>
+          <div class="mindmap-ai-body">
+            <label class="mindmap-field">
+              <span>マップ名</span>
+              <input id="mindMapAiMapName" type="text" maxlength="80" placeholder="省略するとAIが自動でつけます">
+            </label>
+            <label class="mindmap-field">
+              <span>テーマや内容を入力</span>
+              <textarea id="mindMapAiPrompt" rows="4" placeholder="例：プロジェクト管理の重要なポイント、学習計画、マーケティング戦略..."></textarea>
+            </label>
+            <button id="mindMapAiGenerateBtn" class="icon-btn mindmap-ai-generate-btn" type="button">
+              <span class="btn-icon" aria-hidden="true">✨</span>
+              <span class="btn-label">マインドマップを生成</span>
+            </button>
+            <p id="mindMapAiError" class="mindmap-ai-error" hidden></p>
+          </div>
         </div>
       </div>
 
