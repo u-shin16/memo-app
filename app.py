@@ -14,6 +14,9 @@ load_dotenv()
 BASE_DIR = Path(__file__).resolve().parent
 app = Flask(__name__)
 
+_USE_VERTEX_AI = os.getenv("USE_VERTEX_AI", "false").lower() == "true"
+_GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash-lite")
+
 _NOTE_PROMPT = """\
 あなたは階層型メモ生成AIです。与えられたテーマをもとに、階層構造のメモをJSON形式で生成してください。
 
@@ -77,6 +80,20 @@ _MINDMAP_PROMPT = """\
 テーマ・内容：{prompt}"""
 
 
+def create_gemini_client():
+    if _USE_VERTEX_AI:
+        project = os.getenv("GOOGLE_CLOUD_PROJECT", "")
+        location = os.getenv("GOOGLE_CLOUD_LOCATION", "us-central1")
+        if not project:
+            raise RuntimeError("GOOGLE_CLOUD_PROJECT が設定されていません")
+        return genai.Client(vertexai=True, project=project, location=location)
+
+    api_key = os.getenv("GEMINI_API_KEY", "")
+    if not api_key:
+        raise RuntimeError("GEMINI_API_KEY が設定されていません")
+    return genai.Client(api_key=api_key)
+
+
 @app.get("/")
 def index():
     return render_template("index.html")
@@ -94,14 +111,10 @@ def api_ai_note():
     if not prompt:
         return jsonify(error="prompt is required"), 400
 
-    api_key = os.getenv("GEMINI_API_KEY", "")
-    if not api_key:
-        return jsonify(error="GEMINI_API_KEY が設定されていません"), 500
-
     try:
-        client = genai.Client(api_key=api_key)
+        client = create_gemini_client()
         response = client.models.generate_content(
-            model="gemini-2.5-flash",
+            model=_GEMINI_MODEL,
             contents=_NOTE_PROMPT.format(prompt=prompt),
             config=genai_types.GenerateContentConfig(
                 response_mime_type="application/json",
@@ -127,14 +140,10 @@ def api_ai_mindmap():
     if not prompt:
         return jsonify(error="prompt is required"), 400
 
-    api_key = os.getenv("GEMINI_API_KEY", "")
-    if not api_key:
-        return jsonify(error="GEMINI_API_KEY が設定されていません"), 500
-
     try:
-        client = genai.Client(api_key=api_key)
+        client = create_gemini_client()
         response = client.models.generate_content(
-            model="gemini-2.5-flash",
+            model=_GEMINI_MODEL,
             contents=_MINDMAP_PROMPT.format(prompt=prompt),
             config=genai_types.GenerateContentConfig(
                 response_mime_type="application/json",
