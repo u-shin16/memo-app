@@ -59,6 +59,7 @@ let _isMindMapNodeTitleComposing = false;
 const els = {
   sidebar:          document.getElementById("sidebar"),
   mobileMenuBtn:      document.getElementById("mobileMenuBtn"),
+  mobileMenuCloseBtn: document.getElementById("mobileMenuCloseBtn"),
   noteListBtn:        document.getElementById("noteListBtn"),
   noteListPanel:      document.getElementById("noteListPanel"),
   noteListItems:      document.getElementById("noteListItems"),
@@ -275,18 +276,29 @@ function updateNoteListButton(open) {
 
 function setMobileMenuOpen(open) {
   const shouldOpen = Boolean(open) && isMobileMenuLayout();
+  if (shouldOpen) {
+    closeNoteListPanel();
+    closeMemoFormatPanel();
+    closeMemoSettingsPanel();
+  }
   els.appShell.classList.toggle("mobile-menu-open", shouldOpen);
   els.mobileMenuBackdrop.hidden = !shouldOpen;
   document.body.classList.toggle("has-mobile-menu-open", shouldOpen);
   els.mobileMenuBtn.setAttribute("aria-expanded", String(shouldOpen));
   els.mobileMenuBtn.setAttribute(
     "aria-label",
-    shouldOpen ? "メモ一覧を閉じる" : "メモ一覧を開く"
+    shouldOpen ? "サイドメニューを閉じる" : "サイドメニューを開く"
   );
-  els.mobileMenuBtn.title = shouldOpen ? "メモ一覧を閉じる" : "メモ一覧を開く";
+  els.mobileMenuBtn.title = shouldOpen ? "サイドメニューを閉じる" : "サイドメニューを開く";
+  if (isMobileMenuLayout()) {
+    els.sidebar?.setAttribute("aria-hidden", String(!shouldOpen));
+  } else {
+    els.sidebar?.removeAttribute("aria-hidden");
+  }
 
   const icon = els.mobileMenuBtn.querySelector(".mobile-menu-icon");
   if (icon) icon.textContent = shouldOpen ? "×" : "☰";
+  if (shouldOpen) requestAnimationFrame(() => els.mobileMenuCloseBtn?.focus());
 }
 
 function toggleMobileMenu() {
@@ -7297,6 +7309,10 @@ els.mobileMenuBtn?.addEventListener("click", e => {
   e.stopPropagation();
   toggleMobileMenu();
 });
+els.mobileMenuCloseBtn?.addEventListener("click", () => {
+  closeMobileMenu();
+  els.mobileMenuBtn?.focus();
+});
 els.noteListBtn?.addEventListener("click", e => {
   e.stopPropagation();
   if (els.noteListPanel?.hidden) openNoteListPanel();
@@ -7320,15 +7336,16 @@ els.noteListItems?.addEventListener("click", e => {
 els.mobileMenuBackdrop.addEventListener("click", closeMobileMenu);
 if (mobileMenuMql.addEventListener) {
   mobileMenuMql.addEventListener("change", e => {
-    if (!e.matches) closeMobileMenu();
+    closeMobileMenu();
     closeNoteListPanel();
   });
 } else {
   mobileMenuMql.addListener(e => {
-    if (!e.matches) closeMobileMenu();
+    closeMobileMenu();
     closeNoteListPanel();
   });
 }
+setMobileMenuOpen(false);
 
 els.titleInput.addEventListener("input", scheduleSave);
 els.memoSettingsBtn?.addEventListener("click", e => {

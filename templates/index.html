@@ -27,14 +27,12 @@
 </head>
 <body>
   <div class="app-shell" hidden>
-    <!-- 旧モバイルメニューボタン（JS参照のため保持・非表示） -->
-    <button id="mobileMenuBtn" class="mobile-menu-btn" type="button" aria-controls="sidebar" aria-expanded="false" hidden>
-      <span class="btn-icon mobile-menu-icon" aria-hidden="true">☰</span>
-      <span class="mobile-menu-text">メモ</span>
-    </button>
-
     <header class="note-head">
       <div class="note-nav-btns">
+        <button id="mobileMenuBtn" class="mindmap-tool-btn mobile-menu-btn" type="button" title="サイドメニューを開く" aria-label="サイドメニューを開く" aria-controls="sidebar" aria-expanded="false">
+          <span class="btn-icon mobile-menu-icon" aria-hidden="true">☰</span>
+          <span class="mobile-menu-text">メニュー</span>
+        </button>
         <button id="mindMapBtn" class="mindmap-switch-btn" type="button" title="マインドマップを開く" aria-label="マインドマップを開く">
           <span class="btn-icon" aria-hidden="true">✣</span>
           <span class="btn-label">マインドマップ</span>
@@ -77,6 +75,10 @@
     <div id="mobileMenuBackdrop" class="mobile-menu-backdrop" hidden></div>
 
     <aside id="sidebar" class="sidebar">
+      <div class="sidebar-mobile-head">
+        <span>メモメニュー</span>
+        <button id="mobileMenuCloseBtn" class="sidebar-mobile-close" type="button" title="サイドメニューを閉じる" aria-label="サイドメニューを閉じる">×</button>
+      </div>
       <div class="brand">
         <div>
           <p class="eyebrow">Hierarchical Notes</p>

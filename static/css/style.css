@@ -82,8 +82,12 @@ button {
   color: #fff;
 }
 
-.mobile-menu-btn,
 .mobile-menu-backdrop {
+  display: none;
+}
+
+.note-head .mobile-menu-btn,
+.sidebar-mobile-head {
   display: none;
 }
 
@@ -1375,7 +1379,22 @@ body.has-large-editor-open .note-head {
   }
 
   .note-head {
+    flex-wrap: wrap;
+    gap: 6px;
     padding: calc(8px + env(safe-area-inset-top)) 12px 8px;
+  }
+
+  .note-head .mobile-menu-btn {
+    display: inline-flex;
+  }
+
+  .note-nav-btns {
+    flex: 1 1 auto;
+    gap: 4px;
+  }
+
+  .note-head-spacer {
+    display: none;
   }
 
   .note-head-actions .mindmap-tool-btn .btn-label {
@@ -1383,10 +1402,12 @@ body.has-large-editor-open .note-head {
   }
 
   .note-head-actions {
+    flex: 0 1 auto;
     gap: 4px;
+    margin-left: auto;
   }
 
-  .app-shell.mobile-menu-open .note-nav-btns #noteListBtn {
+  .app-shell.mobile-menu-open .note-nav-btns #mobileMenuBtn {
     background: var(--primary);
     color: #fff;
   }
@@ -1404,12 +1425,12 @@ body.has-large-editor-open .note-head {
     position: fixed;
     inset: 0 auto 0 0;
     z-index: 11100;
-    width: min(86vw, 360px);
+    width: min(92vw, 380px);
     height: 100vh;
     height: 100dvh;
     min-height: 0;
     gap: 12px;
-    padding: 18px 16px 18px;
+    padding: calc(12px + env(safe-area-inset-top)) 16px calc(18px + env(safe-area-inset-bottom));
     border-bottom: 0;
     border-right: 1px solid var(--line);
     box-shadow: 20px 0 42px rgba(15, 23, 42, 0.18);
@@ -1420,6 +1441,35 @@ body.has-large-editor-open .note-head {
 
   .app-shell.mobile-menu-open .sidebar {
     transform: translateX(0);
+  }
+
+  .sidebar-mobile-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 44px;
+    font-size: 15px;
+    font-weight: 800;
+  }
+
+  .sidebar-mobile-close {
+    width: 44px;
+    height: 44px;
+    border: 0;
+    border-radius: 12px;
+    background: var(--panel-soft);
+    color: var(--text);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 26px;
+    line-height: 1;
+  }
+
+  .sidebar-mobile-close:hover,
+  .sidebar-mobile-close:focus-visible {
+    background: var(--line);
+    outline: 2px solid var(--primary-soft);
   }
 
   .brand {
@@ -1554,6 +1604,10 @@ body.has-large-editor-open .note-head {
     font-size: 12px;
   }
 
+  .status-bar span:last-child {
+    display: none;
+  }
+
   .context-menu {
     z-index: 11300;
     max-width: calc(100vw - 16px);
@@ -1564,6 +1618,26 @@ body.has-large-editor-open .note-head {
     right: 8px !important;
     width: auto;
     min-width: 0;
+  }
+}
+
+@media (max-width: 520px) {
+  .note-head {
+    padding-right: 8px;
+    padding-left: 8px;
+  }
+
+  .note-head .mindmap-tool-btn,
+  .note-head .mindmap-switch-btn {
+    width: 42px;
+    min-width: 42px;
+    min-height: 42px;
+    padding: 8px 4px;
+  }
+
+  .note-head .btn-label,
+  .note-head .mobile-menu-text {
+    display: none;
   }
 }
 
