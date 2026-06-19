@@ -670,7 +670,8 @@ body.has-large-editor-open .note-head {
   border-color: #bbf7d0;
 }
 
-.mindmap-tool-btn.check-toggle-btn.active {
+.mindmap-tool-btn.check-toggle-btn.active,
+.settings-action-btn.check-toggle-btn.active {
   background: #dcfce7;
   color: #166534;
 }
