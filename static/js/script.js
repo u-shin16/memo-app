@@ -356,15 +356,35 @@ function downloadNotesAsPdf() {
   const pageTitle = selectedNote?.title || "メモ";
 
   const escaped = pageTitle.replace(/&/g,"&amp;").replace(/</g,"&lt;");
+  const now = new Date();
+  const dateStr = `${now.getFullYear()}年${now.getMonth()+1}月${now.getDate()}日`;
   const html = `<!DOCTYPE html><html lang="ja"><head><meta charset="utf-8">
     <title>${escaped}</title>
     <style>
-      body{font-family:system-ui,sans-serif;padding:32px;max-width:900px;margin:0 auto;color:#1f2937;background:#fff}
-      @media print{body{padding:0}}
-    </style></head><body>
-    <h1 style="font-size:22px;font-weight:bold;margin-bottom:24px;padding-bottom:12px;border-bottom:2px solid #e5e7eb">
-      ${escaped}
-    </h1>
+      @page { margin: 0; size: A4; }
+      body {
+        font-family: system-ui, -apple-system, sans-serif;
+        margin: 0;
+        padding: 24mm 20mm 20mm;
+        color: #1f2937;
+        background: #fff;
+        box-sizing: border-box;
+      }
+      .doc-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-end;
+        margin-bottom: 20px;
+        padding-bottom: 12px;
+        border-bottom: 2px solid #e5e7eb;
+      }
+    </style>
+  </head><body>
+    <div class="doc-header">
+      <span style="font-size:11px;color:#6b7280">${dateStr}</span>
+      <span style="font-size:20px;font-weight:bold">${escaped}</span>
+      <span style="width:80px"></span>
+    </div>
     ${body}
   </body></html>`;
 
