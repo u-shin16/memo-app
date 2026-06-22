@@ -48,9 +48,13 @@
           <span class="btn-icon" aria-hidden="true">✨</span>
           <span class="btn-label">AI生成</span>
         </button>
-        <button id="memoSettingsBtn" class="mindmap-tool-btn settings-trigger-btn" type="button" title="メモの設定とその他の操作" aria-label="メモの設定とその他の操作" aria-haspopup="dialog" aria-expanded="false" aria-controls="memoSettingsPanel">
+        <button id="memoSettingsBtn" class="mindmap-tool-btn settings-trigger-btn" type="button" title="メモ設定" aria-label="メモ設定" aria-haspopup="dialog" aria-expanded="false" aria-controls="memoSettingsPanel">
           <span class="btn-icon" aria-hidden="true">⚙</span>
-          <span class="btn-label">設定</span>
+          <span class="btn-label">メモ設定</span>
+        </button>
+        <button id="appManageBtn" class="mindmap-tool-btn" type="button" title="アプリ設定" aria-label="アプリ設定を開く" aria-haspopup="dialog" aria-expanded="false" aria-controls="appManagementOverlay">
+          <span class="btn-icon" aria-hidden="true">ⓘ</span>
+          <span class="btn-label">アプリ設定</span>
         </button>
         <button id="memoFormatToggleBtn" class="mindmap-tool-btn memo-format-trigger-btn" type="button" title="文字の書式を変更" aria-label="文字の書式を変更" aria-expanded="false" aria-controls="memoFormatBar">
           <span class="btn-icon" aria-hidden="true">A</span>
@@ -89,7 +93,7 @@
             <span class="btn-icon" aria-hidden="true">▣</span>
             <span class="btn-label">テンプレート</span>
           </button>
-          <button id="accountBtn" class="icon-btn" title="アカウントメニューを開く" aria-label="アカウントメニューを開く">
+          <button id="accountBtn" class="icon-btn" title="アカウント設定を開く" aria-label="アカウント設定を開く" aria-haspopup="dialog" aria-controls="appAccountDialog" aria-expanded="false">
             <span class="btn-icon" aria-hidden="true">👤</span>
             <span class="btn-label">アカウント</span>
           </button>
@@ -117,21 +121,25 @@
       <div id="noteAiPanel" class="mindmap-ai-panel note-ai-panel" role="dialog" aria-label="AIメモ生成" hidden>
         <div class="mindmap-ai-dialog">
           <div class="mindmap-node-settings-head">
-            <p class="mindmap-node-settings-title">✨ AI メモ生成</p>
+            <p class="mindmap-node-settings-title">AIメモ</p>
             <button id="noteAiClose" class="mindmap-node-settings-close" type="button" title="閉じる" aria-label="閉じる">×</button>
           </div>
           <div class="mindmap-ai-body">
             <label class="mindmap-field">
-              <span>メモタイトル（省略可）</span>
-              <input id="noteAiTitle" type="text" maxlength="120" placeholder="省略するとAIが自動でつけます">
+              <span>タイトル（任意）</span>
+              <input id="noteAiTitle" type="text" maxlength="120" placeholder="未入力なら自動生成">
             </label>
             <label class="mindmap-field">
-              <span>テーマや内容を入力</span>
-              <textarea id="noteAiPrompt" rows="4" placeholder="例：Pythonの基礎知識、マーケティング戦略の立て方、健康的な生活習慣..."></textarea>
+              <span>内容</span>
+              <textarea id="noteAiPrompt" rows="4" placeholder="作りたい内容を入力"></textarea>
+            </label>
+            <label class="mindmap-field ai-file-field">
+              <span>ファイル（任意）</span>
+              <input id="noteAiFile" class="ai-file-input" type="file" accept=".txt,.md,.csv,.json,.pdf,.docx,.xlsx,.png,.jpg,.jpeg,.webp,.heic,.heif">
+              <small>画像・文書／10MBまで</small>
             </label>
             <button id="noteAiGenerateBtn" class="icon-btn mindmap-ai-generate-btn" type="button">
-              <span class="btn-icon" aria-hidden="true">✨</span>
-              <span class="btn-label">メモを生成</span>
+              <span class="btn-label">生成</span>
             </button>
             <p id="noteAiError" class="mindmap-ai-error" hidden></p>
           </div>
@@ -166,13 +174,23 @@
         <div class="settings-section">
           <p class="settings-section-title">その他の操作</p>
           <div class="settings-action-grid">
-            <button id="noteToMindMapBtn" class="settings-action-btn" title="選択中のメモをマインドマップに変換">
+            <button id="noteToMindMapBtn" class="settings-action-btn" title="選択中のメモをマインドマップと同期">
               <span class="btn-icon" aria-hidden="true">⇄</span>
-              <span class="btn-label">マップ化</span>
+              <span class="btn-label">マップ同期</span>
             </button>
             <button id="deleteBtn" class="settings-action-btn danger" title="選択中のメモを削除">
               <span class="btn-icon" aria-hidden="true">🗑</span>
               <span class="btn-label">削除</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <p class="settings-section-title">ダウンロード</p>
+          <div class="settings-action-grid">
+            <button id="downloadNotesPdfBtn" class="settings-action-btn" type="button" title="メモをPDFとして保存（印刷ダイアログで「PDFに保存」を選択）">
+              <span class="btn-icon" aria-hidden="true">⬇</span>
+              <span class="btn-label">PDF</span>
             </button>
           </div>
         </div>
@@ -411,9 +429,13 @@
             <span class="btn-icon" aria-hidden="true">✨</span>
             <span class="btn-label">AI生成</span>
           </button>
-          <button id="mindMapSettingsBtn" class="mindmap-tool-btn" type="button" title="マインドマップの設定とその他の操作" aria-label="マインドマップの設定とその他の操作" aria-haspopup="dialog" aria-expanded="false" aria-controls="mindMapSettingsPanel">
+          <button id="mindMapSettingsBtn" class="mindmap-tool-btn" type="button" title="マップ設定" aria-label="マップ設定" aria-haspopup="dialog" aria-expanded="false" aria-controls="mindMapSettingsPanel">
             <span class="btn-icon" aria-hidden="true">⚙</span>
-            <span class="btn-label">設定</span>
+            <span class="btn-label">マップ設定</span>
+          </button>
+          <button id="mindMapManageBtn" class="mindmap-tool-btn" type="button" title="アプリ設定" aria-label="アプリ設定を開く" aria-haspopup="dialog" aria-expanded="false" aria-controls="appManagementOverlay">
+            <span class="btn-icon" aria-hidden="true">ⓘ</span>
+            <span class="btn-label">アプリ設定</span>
           </button>
           <button id="mindMapNodeSettingsBtn" class="mindmap-tool-btn" type="button" title="選択中のノードを編集" aria-label="選択中のノードを編集" aria-haspopup="dialog" aria-expanded="false" aria-controls="mindMapNodeSettingsPanel">
             <span class="btn-icon" aria-hidden="true">◇</span>
@@ -426,10 +448,10 @@
         </div>
       </header>
 
-      <div id="mindMapSettingsPanel" class="mindmap-settings-panel" role="dialog" aria-label="マインドマップ設定" hidden>
+      <div id="mindMapSettingsPanel" class="mindmap-settings-panel" role="dialog" aria-label="マップ設定" hidden>
         <div class="mindmap-node-settings-head">
-          <p class="mindmap-node-settings-title">設定</p>
-          <button id="mindMapSettingsClose" class="mindmap-node-settings-close" type="button" title="閉じる" aria-label="設定を閉じる">×</button>
+          <p class="mindmap-node-settings-title">マップ設定</p>
+          <button id="mindMapSettingsClose" class="mindmap-node-settings-close" type="button" title="閉じる" aria-label="マップ設定を閉じる">×</button>
         </div>
 
         <div class="mindmap-settings-list">
@@ -463,13 +485,27 @@
               <span class="btn-icon" aria-hidden="true">⛶</span>
               <span class="btn-label">大画面</span>
             </button>
-            <button id="mindMapToNoteBtn" class="settings-action-btn" type="button" title="現在のマインドマップをメモに変換">
+            <button id="mindMapToNoteBtn" class="settings-action-btn" type="button" title="現在のマインドマップをメモと同期">
               <span class="btn-icon" aria-hidden="true">⇄</span>
-              <span class="btn-label">メモ化</span>
+              <span class="btn-label">メモ同期</span>
             </button>
             <button id="mindMapNewBtn" class="settings-action-btn" type="button" title="新規マップ">
               <span class="btn-icon" aria-hidden="true">＋</span>
               <span class="btn-label">新規マップ</span>
+            </button>
+            <button id="mindMapDeleteBtn" class="settings-action-btn danger" type="button" title="現在のマインドマップを削除">
+              <span class="btn-icon" aria-hidden="true">🗑</span>
+              <span class="btn-label">削除</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <p class="settings-section-title">ダウンロード</p>
+          <div class="settings-action-grid">
+            <button id="downloadMapPngBtn" class="settings-action-btn" type="button" title="マインドマップをPNG画像でダウンロード">
+              <span class="btn-icon" aria-hidden="true">⬇</span>
+              <span class="btn-label">PNG</span>
             </button>
           </div>
         </div>
@@ -553,13 +589,13 @@
       </div>
 
       <div id="mindMapListContextMenu" class="context-menu" hidden>
-        <button class="ctx-item" data-mindmap-list-action="convert-note">⇄　メモに変換</button>
+        <button class="ctx-item" data-mindmap-list-action="convert-note">⇄　メモと同期</button>
       </div>
 
       <div id="mindMapContextMenu" class="context-menu mindmap-context-menu" hidden>
         <button class="ctx-item" data-mindmap-action="rename">✏️　名前を変更</button>
         <button class="ctx-item" data-mindmap-action="add-child">＋　子ノードを追加</button>
-        <button class="ctx-item" data-mindmap-action="convert-note">⇄　メモに変換</button>
+        <button class="ctx-item" data-mindmap-action="convert-note">⇄　メモと同期</button>
         <button class="ctx-item" data-mindmap-action="toggle-children">▾　子を隠す</button>
         <button class="ctx-item" data-mindmap-action="collapse-subtree">▾▾　配下をすべて折りたたむ</button>
         <button class="ctx-item" data-mindmap-action="align">↕　同階層を整列</button>
@@ -604,21 +640,25 @@
       <div id="mindMapAiPanel" class="mindmap-ai-panel" role="dialog" aria-label="AIマインドマップ生成" hidden>
         <div class="mindmap-ai-dialog">
           <div class="mindmap-node-settings-head">
-            <p class="mindmap-node-settings-title">✨ AI マインドマップ生成</p>
+            <p class="mindmap-node-settings-title">AIマップ</p>
             <button id="mindMapAiClose" class="mindmap-node-settings-close" type="button" title="閉じる" aria-label="閉じる">×</button>
           </div>
           <div class="mindmap-ai-body">
             <label class="mindmap-field">
-              <span>マップ名</span>
-              <input id="mindMapAiMapName" type="text" maxlength="80" placeholder="省略するとAIが自動でつけます">
+              <span>タイトル（任意）</span>
+              <input id="mindMapAiMapName" type="text" maxlength="80" placeholder="未入力なら自動生成">
             </label>
             <label class="mindmap-field">
-              <span>テーマや内容を入力</span>
-              <textarea id="mindMapAiPrompt" rows="4" placeholder="例：プロジェクト管理の重要なポイント、学習計画、マーケティング戦略..."></textarea>
+              <span>内容</span>
+              <textarea id="mindMapAiPrompt" rows="4" placeholder="整理したい内容を入力"></textarea>
+            </label>
+            <label class="mindmap-field ai-file-field">
+              <span>ファイル（任意）</span>
+              <input id="mindMapAiFile" class="ai-file-input" type="file" accept=".txt,.md,.csv,.json,.pdf,.docx,.xlsx,.png,.jpg,.jpeg,.webp,.heic,.heif">
+              <small>画像・文書／10MBまで</small>
             </label>
             <button id="mindMapAiGenerateBtn" class="icon-btn mindmap-ai-generate-btn" type="button">
-              <span class="btn-icon" aria-hidden="true">✨</span>
-              <span class="btn-label">マインドマップを生成</span>
+              <span class="btn-label">生成</span>
             </button>
             <p id="mindMapAiError" class="mindmap-ai-error" hidden></p>
           </div>
@@ -667,7 +707,7 @@
                 <span class="btn-icon" aria-hidden="true">▣</span>
                 <span class="btn-label">テンプレート</span>
               </button>
-              <button id="mindMapAccountBtn" class="icon-btn" type="button" title="アカウントメニューを開く" aria-label="アカウントメニューを開く">
+              <button id="mindMapAccountBtn" class="icon-btn" type="button" title="アカウント設定を開く" aria-label="アカウント設定を開く" aria-haspopup="dialog" aria-controls="appAccountDialog" aria-expanded="false">
                 <span class="btn-icon" aria-hidden="true">👤</span>
                 <span class="btn-label">アカウント</span>
               </button>
@@ -706,15 +746,208 @@
   <div id="contextMenu" class="context-menu" hidden>
     <button class="ctx-item" data-action="rename">✏️　名前を変更</button>
     <button class="ctx-item" data-action="add-child">＋　メモを追加</button>
-    <button class="ctx-item" data-action="convert-mindmap">⇄　マインドマップ化</button>
+    <button class="ctx-item" data-action="convert-mindmap">⇄　マインドマップと同期</button>
     <button class="ctx-item" data-action="toggle-check">✓　チェックする</button>
     <button class="ctx-item" data-action="toggle-pin">📌　ピン留め</button>
     <button class="ctx-item" data-action="move-sibling-top">↑　最上位へ移動</button>
     <button class="ctx-item" data-action="move-sibling-bottom">↓　最下位へ移動</button>
+    <button class="ctx-item" data-action="open-lock" hidden>🔑　鍵を開ける</button>
     <button class="ctx-item" data-action="toggle-lock">🔒　鍵をかける</button>
     <button class="ctx-item" data-action="relock-note" hidden>🔒　再ロック</button>
     <div class="ctx-sep"></div>
     <button class="ctx-item ctx-danger" data-action="delete">🗑　削除</button>
+  </div>
+
+  <!-- メモ・マップ共通のアプリ設定画面 -->
+  <div id="appManagementOverlay" class="app-management-overlay" hidden>
+    <section id="appManagementDialog" class="app-management-dialog" role="dialog" aria-modal="true" aria-labelledby="appManagementTitle">
+      <div class="templates-head">
+        <p id="appManagementTitle" class="templates-title">アプリ設定</p>
+        <button id="appManagementClose" class="templates-close" type="button" title="閉じる" aria-label="アプリ設定を閉じる">×</button>
+      </div>
+
+      <div class="app-management-menu">
+        <button id="appHowToBtn" class="app-management-menu-btn" type="button" aria-controls="appHowToDialog" aria-expanded="false">
+          <span class="app-management-menu-icon" aria-hidden="true">?</span>
+          <span>
+            <strong>使い方</strong>
+            <small>メモ・マップ・同期・AIの操作ガイド</small>
+          </span>
+          <span class="app-management-menu-arrow" aria-hidden="true">›</span>
+        </button>
+
+        <button id="appDataInfoBtn" class="app-management-menu-btn" type="button" aria-controls="appInfoDialog" aria-expanded="false">
+          <span class="app-management-menu-icon" aria-hidden="true">i</span>
+          <span>
+            <strong>データについて</strong>
+            <small>メモとマップの保存について</small>
+          </span>
+          <span class="app-management-menu-arrow" aria-hidden="true">›</span>
+        </button>
+
+        <button id="appAccountBtn" class="app-management-menu-btn" type="button" aria-haspopup="dialog" aria-controls="appAccountDialog" aria-expanded="false">
+          <span class="app-management-menu-icon" aria-hidden="true">人</span>
+          <span>
+            <strong>アカウント</strong>
+            <small>表示名・認証・ログアウト・アカウント削除</small>
+          </span>
+          <span class="app-management-menu-arrow" aria-hidden="true">›</span>
+        </button>
+
+        <button id="appCreatorInfoBtn" class="app-management-menu-btn" type="button" aria-controls="appInfoDialog" aria-expanded="false">
+          <span class="app-management-menu-icon" aria-hidden="true">作</span>
+          <span>
+            <strong>制作者情報</strong>
+            <small>制作者のプロフィール</small>
+          </span>
+          <span class="app-management-menu-arrow" aria-hidden="true">›</span>
+        </button>
+
+        <button id="appContactBtn" class="app-management-menu-btn" type="button" aria-controls="appInfoDialog" aria-expanded="false">
+          <span class="app-management-menu-icon" aria-hidden="true">@</span>
+          <span>
+            <strong>お問い合わせ</strong>
+            <small>ご意見・不具合・機能のご要望</small>
+          </span>
+          <span class="app-management-menu-arrow" aria-hidden="true">›</span>
+        </button>
+      </div>
+    </section>
+
+    <section id="appHowToDialog" class="app-management-dialog app-howto-dialog" role="dialog" aria-modal="true" aria-labelledby="appHowToTitle" hidden>
+      <div class="templates-head">
+        <div class="app-howto-heading">
+          <button id="appHowToBack" class="app-management-back" type="button" aria-label="アプリ設定へ戻る">←</button>
+          <p id="appHowToTitle" class="templates-title">使い方</p>
+        </div>
+        <button id="appHowToClose" class="templates-close" type="button" title="閉じる" aria-label="使い方を閉じる">×</button>
+      </div>
+
+      <div class="app-howto-tabs" role="tablist" aria-label="使い方の種類">
+        <button id="appNoteHowToTab" class="app-howto-tab" type="button" role="tab" aria-selected="true" aria-controls="appNoteHowToPanel">メモ</button>
+        <button id="appMindMapHowToTab" class="app-howto-tab" type="button" role="tab" aria-selected="false" aria-controls="appMindMapHowToPanel" tabindex="-1">マインドマップ</button>
+      </div>
+
+      <div id="appNoteHowToPanel" class="app-howto-content" role="tabpanel" aria-labelledby="appNoteHowToTab">
+        <section class="app-howto-section">
+          <h2><span>1</span>メモを作成・編集する</h2>
+          <p>サイドメニューの「新規メモ」で親メモを作成します。メモ行の「＋」を押すと、そのメモの下に子メモを追加できます。タイトルと本文は入力後に自動保存されます。</p>
+        </section>
+
+        <section class="app-howto-section">
+          <h2><span>2</span>メモを整理する</h2>
+          <p>メモをドラッグすると、並び順や親子関係を変更できます。右クリックメニューでは、名前変更・チェック・ピン留め・鍵・削除などを操作できます。検索欄ではタイトルと本文をまとめて検索できます。</p>
+        </section>
+
+        <section class="app-howto-section">
+          <h2><span>3</span>マインドマップと同期する</h2>
+          <p>「メモ設定」を開き、「マップ同期」から同期先を選びます。同期後は、メモのタイトル・本文・子メモ・並び順・削除がマインドマップにも反映されます。</p>
+        </section>
+
+        <section class="app-howto-section">
+          <h2><span>4</span>AIでメモを生成する</h2>
+          <p>上部の「AI生成」を開き、作りたい内容を入力して「生成」を押します。画像や文書ファイルだけを選んで生成することもできます。タイトルを空欄にするとAIが自動で作成します。</p>
+        </section>
+
+        <section class="app-howto-section">
+          <h2><span>5</span>テンプレートと「戻す」を使う</h2>
+          <p>よく使うメモ構成はテンプレートとして保存できます。「戻す」では直前の編集や削除を取り消せます。重要な変更の後は、一覧で内容が保存されていることも確認してください。</p>
+        </section>
+      </div>
+
+      <div id="appMindMapHowToPanel" class="app-howto-content" role="tabpanel" aria-labelledby="appMindMapHowToTab" hidden>
+        <section class="app-howto-section">
+          <h2><span>1</span>マインドマップを作成・切り替える</h2>
+          <p>上部の「マインドマップ」で画面を開き、「一覧」から新しいマップを作成します。複数のマップがある場合も、一覧から使いたいマップを選んで切り替えられます。</p>
+        </section>
+
+        <section class="app-howto-section">
+          <h2><span>2</span>ノードを追加・編集する</h2>
+          <p>追加先のノードを選択して「＋」を押すと、子ノードを追加できます。ノードを選択して「ノード」設定を開くと、名前・メモ・色を変更できます。</p>
+        </section>
+
+        <section class="app-howto-section">
+          <h2><span>3</span>配置と表示を整える</h2>
+          <p>ノードはドラッグして見やすい位置へ移動できます。子ノードが多いときは折りたたみを使うと全体を確認しやすくなります。拡大表示では広い画面で編集できます。</p>
+        </section>
+
+        <section class="app-howto-section">
+          <h2><span>4</span>メモと同期する</h2>
+          <p>「マップ設定」を開き、「メモ同期」から同期先を選びます。同期後は、ノード名・ノードのメモ・子ノード・並び順・削除がメモにも反映されます。</p>
+        </section>
+
+        <section class="app-howto-section">
+          <h2><span>5</span>AIでマップを生成する</h2>
+          <p>マインドマップ画面の「AI生成」を開き、テーマや作りたい構成を入力して「生成」を押します。画像や文書ファイルを読み込ませ、その内容をもとにマップを作ることもできます。</p>
+        </section>
+
+        <section class="app-howto-section">
+          <h2><span>6</span>マップを削除する</h2>
+          <p>不要なマップは「マップ設定」の削除ボタンから削除できます。削除した内容は元に戻せないため、一覧で対象のマップ名を確認してから実行してください。</p>
+        </section>
+      </div>
+    </section>
+
+    <section id="appInfoDialog" class="app-management-dialog app-info-dialog" role="dialog" aria-modal="true" aria-labelledby="appInfoTitle" hidden>
+      <div class="templates-head">
+        <div class="app-howto-heading">
+          <button id="appInfoBack" class="app-management-back" type="button" aria-label="アプリ設定へ戻る">←</button>
+          <p id="appInfoTitle" class="templates-title">詳細</p>
+        </div>
+        <button id="appInfoClose" class="templates-close" type="button" title="閉じる" aria-label="詳細画面を閉じる">×</button>
+      </div>
+
+      <div id="appDataInfoPanel" class="app-info-content" hidden>
+        <p>メモとマインドマップは、ログイン中のアカウントごとに保存されます。同じアカウントでログインすると、別の端末からも保存した内容を確認できます。</p>
+      </div>
+
+      <div id="appCreatorInfoPanel" class="app-info-content" hidden>
+        <p><strong>MusubiMemo</strong></p>
+        <p>制作者の詳しい情報は、プロフィールページで確認できます。</p>
+        <a class="app-management-link" href="https://profile.webtool-labs.com/" target="_blank" rel="noopener noreferrer">制作者プロフィールを開く</a>
+      </div>
+
+      <div id="appContactPanel" class="app-info-content" hidden>
+        <p>ご意見、不具合の報告、追加してほしい機能などをフォームからお送りください。</p>
+        <a class="app-management-link" href="https://docs.google.com/forms/d/e/1FAIpQLSePfOxSZwYoGcL7csdt1RbLY4eQ9gdu6ePqcgZ96xTxZj8GXA/viewform?usp=publish-editor" target="_blank" rel="noopener noreferrer">お問い合わせフォームを開く</a>
+      </div>
+    </section>
+
+    <section id="appAccountDialog" class="app-management-dialog app-account-dialog" role="dialog" aria-modal="true" aria-labelledby="appAccountTitle" hidden>
+      <div class="templates-head">
+        <div class="app-howto-heading">
+          <button id="appAccountBack" class="app-management-back" type="button" aria-label="アプリ設定へ戻る">←</button>
+          <p id="appAccountTitle" class="templates-title">アカウント</p>
+        </div>
+        <button id="appAccountClose" class="templates-close" type="button" title="閉じる" aria-label="アカウント画面を閉じる">×</button>
+      </div>
+
+      <div class="app-account-summary">
+        <div class="app-account-avatar" aria-hidden="true">人</div>
+        <div class="app-account-identity">
+          <p id="appAccountName" class="app-account-name"></p>
+          <p id="appAccountEmail" class="app-account-email"></p>
+          <p id="appAccountStatus" class="app-account-status"></p>
+        </div>
+      </div>
+
+      <div id="appAccountNameEditRow" class="app-account-name-edit" hidden>
+        <label for="appAccountDisplayNameInput">表示名</label>
+        <input id="appAccountDisplayNameInput" type="text" maxlength="50" placeholder="表示名を入力">
+        <div class="app-account-name-actions">
+          <button id="appAccountDisplayNameCancelBtn" class="btn ghost btn-sm" type="button">キャンセル</button>
+          <button id="appAccountDisplayNameSaveBtn" class="btn btn-sm" type="button">保存</button>
+        </div>
+      </div>
+
+      <div class="app-account-actions">
+        <button id="appAccountEditDisplayNameBtn" class="app-account-action-btn" type="button">表示名を変更</button>
+        <button id="appAccountResendVerificationBtn" class="app-account-action-btn" type="button">確認メールを再送する</button>
+        <button id="appAccountRefreshStatusBtn" class="app-account-action-btn" type="button">認証状況を更新</button>
+        <button id="appAccountLogoutBtn" class="app-account-action-btn" type="button">ログアウト</button>
+        <button id="appAccountDeleteBtn" class="app-account-action-btn danger" type="button">アカウントを削除</button>
+      </div>
+    </section>
   </div>
 
   <!-- アカウントメニュー -->
@@ -748,6 +981,7 @@
     window.FIREBASE_READY = !!(window.firebaseConfig && window.firebaseConfig.apiKey);
     if (window.FIREBASE_READY) firebase.initializeApp(window.firebaseConfig);
   </script>
+  <script src="{{ url_for('static', filename='js/note-mindmap-sync.js') }}"></script>
   <script src="{{ url_for('static', filename='js/script.js') }}"></script>
 </body>
 </html>

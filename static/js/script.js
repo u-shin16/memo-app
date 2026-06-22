@@ -83,6 +83,7 @@ const els = {
   mindMapSettingsBtn: document.getElementById("mindMapSettingsBtn"),
   mindMapSettingsPanel: document.getElementById("mindMapSettingsPanel"),
   mindMapSettingsClose: document.getElementById("mindMapSettingsClose"),
+  mindMapManageBtn: document.getElementById("mindMapManageBtn"),
   mindMapPresentationToggle: document.getElementById("mindMapPresentationToggle"),
   mindMapNodeSettingsBtn: document.getElementById("mindMapNodeSettingsBtn"),
   mindMapNodeSettingsPanel: document.getElementById("mindMapNodeSettingsPanel"),
@@ -97,6 +98,8 @@ const els = {
   mindMapTitleInput: document.getElementById("mindMapTitleInput"),
   mindMapUndoBtn:    document.getElementById("mindMapUndoBtn"),
   mindMapToNoteBtn:  document.getElementById("mindMapToNoteBtn"),
+  mindMapDeleteBtn:      document.getElementById("mindMapDeleteBtn"),
+  downloadMapPngBtn:     document.getElementById("downloadMapPngBtn"),
   mindMapTemplateBtn:       document.getElementById("mindMapTemplateBtn"),
   mindMapTemplatesPanel:    document.getElementById("mindMapTemplatesPanel"),
   mindMapTemplatesClose:    document.getElementById("mindMapTemplatesClose"),
@@ -112,6 +115,7 @@ const els = {
   mindMapAiClose:        document.getElementById("mindMapAiClose"),
   mindMapAiMapName:      document.getElementById("mindMapAiMapName"),
   mindMapAiPrompt:       document.getElementById("mindMapAiPrompt"),
+  mindMapAiFile:         document.getElementById("mindMapAiFile"),
   mindMapAiGenerateBtn:  document.getElementById("mindMapAiGenerateBtn"),
   mindMapAiError:        document.getElementById("mindMapAiError"),
   mindMapAddChildBtn: document.getElementById("mindMapAddChildBtn"),
@@ -151,14 +155,54 @@ const els = {
   noteAiClose:      document.getElementById("noteAiClose"),
   noteAiTitle:      document.getElementById("noteAiTitle"),
   noteAiPrompt:     document.getElementById("noteAiPrompt"),
+  noteAiFile:       document.getElementById("noteAiFile"),
   noteAiGenerateBtn: document.getElementById("noteAiGenerateBtn"),
   noteAiError:      document.getElementById("noteAiError"),
   checkBtn:         document.getElementById("checkBtn"),
   memoSettingsBtn:  document.getElementById("memoSettingsBtn"),
   memoSettingsPanel: document.getElementById("memoSettingsPanel"),
   memoSettingsClose: document.getElementById("memoSettingsClose"),
+  appManageBtn:      document.getElementById("appManageBtn"),
+  appManagementOverlay: document.getElementById("appManagementOverlay"),
+  appManagementDialog: document.getElementById("appManagementDialog"),
+  appManagementClose: document.getElementById("appManagementClose"),
+  appHowToBtn:       document.getElementById("appHowToBtn"),
+  appHowToDialog:    document.getElementById("appHowToDialog"),
+  appHowToBack:      document.getElementById("appHowToBack"),
+  appHowToClose:     document.getElementById("appHowToClose"),
+  appNoteHowToTab:   document.getElementById("appNoteHowToTab"),
+  appMindMapHowToTab: document.getElementById("appMindMapHowToTab"),
+  appNoteHowToPanel: document.getElementById("appNoteHowToPanel"),
+  appMindMapHowToPanel: document.getElementById("appMindMapHowToPanel"),
+  appDataInfoBtn:    document.getElementById("appDataInfoBtn"),
+  appAccountBtn:     document.getElementById("appAccountBtn"),
+  appAccountDialog:  document.getElementById("appAccountDialog"),
+  appAccountBack:    document.getElementById("appAccountBack"),
+  appAccountClose:   document.getElementById("appAccountClose"),
+  appAccountName:    document.getElementById("appAccountName"),
+  appAccountEmail:   document.getElementById("appAccountEmail"),
+  appAccountStatus:  document.getElementById("appAccountStatus"),
+  appAccountNameEditRow: document.getElementById("appAccountNameEditRow"),
+  appAccountDisplayNameInput: document.getElementById("appAccountDisplayNameInput"),
+  appAccountDisplayNameSaveBtn: document.getElementById("appAccountDisplayNameSaveBtn"),
+  appAccountDisplayNameCancelBtn: document.getElementById("appAccountDisplayNameCancelBtn"),
+  appAccountEditDisplayNameBtn: document.getElementById("appAccountEditDisplayNameBtn"),
+  appAccountResendVerificationBtn: document.getElementById("appAccountResendVerificationBtn"),
+  appAccountRefreshStatusBtn: document.getElementById("appAccountRefreshStatusBtn"),
+  appAccountLogoutBtn: document.getElementById("appAccountLogoutBtn"),
+  appAccountDeleteBtn: document.getElementById("appAccountDeleteBtn"),
+  appCreatorInfoBtn: document.getElementById("appCreatorInfoBtn"),
+  appContactBtn:     document.getElementById("appContactBtn"),
+  appInfoDialog:     document.getElementById("appInfoDialog"),
+  appInfoTitle:      document.getElementById("appInfoTitle"),
+  appInfoBack:       document.getElementById("appInfoBack"),
+  appInfoClose:      document.getElementById("appInfoClose"),
+  appDataInfoPanel:  document.getElementById("appDataInfoPanel"),
+  appCreatorInfoPanel: document.getElementById("appCreatorInfoPanel"),
+  appContactPanel:   document.getElementById("appContactPanel"),
   memoFormatToggleBtn: document.getElementById("memoFormatToggleBtn"),
-  noteToMindMapBtn: document.getElementById("noteToMindMapBtn"),
+  noteToMindMapBtn:      document.getElementById("noteToMindMapBtn"),
+  downloadNotesPdfBtn:   document.getElementById("downloadNotesPdfBtn"),
   memoFormatBar:    document.getElementById("memoFormatBar"),
   memoTextColorBtn: document.getElementById("memoTextColorBtn"),
   memoTextColorLabel: document.getElementById("memoTextColorLabel"),
@@ -255,6 +299,198 @@ if (!STORAGE_ENABLED) {
 
 // ── Toast ─────────────────────────────────────────────────────────────────────
 
+// ── ダウンロードユーティリティ ──────────────────────────────
+
+function safeFilename(name) {
+  return (name || "untitled").replace(/[\\/:*?"<>|]/g, "_").slice(0, 60);
+}
+
+function triggerBlobDownload(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+// メモ → PDF（印刷ダイアログ経由）
+function downloadNotesAsPdf() {
+  if (!state.selectedId) { showToast("メモを選択してください。"); return; }
+  const notes = getNotes();
+  const childrenOf = (pid) =>
+    notes.filter(n => (n.parent_id ?? null) === (pid ?? null))
+      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+
+  function buildHtml(noteId, numPath) {
+    const note = notes.find(n => n.id === noteId);
+    if (!note) return "";
+    const depth = numPath.length - 1;
+    const indent = depth * 28;
+    const numLabel = numPath.join("-");
+    const check = note.checked ? " <span style='color:#16a34a'>✓</span>" : "";
+    const pin = note.pinned ? " <span style='color:#dc2626'>📌</span>" : "";
+    const title = (note.title || "無題").replace(/&/g,"&amp;").replace(/</g,"&lt;");
+    const content = contentToPlainText(note.content ?? "").trim()
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/\n/g, "<br>");
+    const fontSize = Math.max(13, 20 - depth * 2);
+    const numColor = depth === 0 ? "#2563eb" : "#6b7280";
+    let html = `<div style="margin-left:${indent}px;margin-bottom:12px">
+      <div style="font-size:${fontSize}px;font-weight:${depth === 0 ? "bold" : "600"};color:#1f2937;display:flex;align-items:baseline;gap:8px">
+        <span style="font-size:${Math.max(11, fontSize - 2)}px;color:${numColor};font-weight:bold;white-space:nowrap;min-width:2em">${numLabel}</span>
+        <span>${title}${check}${pin}</span>
+      </div>
+      ${content ? `<div style="font-size:13px;color:#4b5563;margin-top:4px;margin-left:${Math.max(11, fontSize - 2) * 1.2 + 8}px;line-height:1.6">${content}</div>` : ""}
+    </div>`;
+    childrenOf(note.id).forEach((child, i) => {
+      html += buildHtml(child.id, [...numPath, i + 1]);
+    });
+    return html;
+  }
+
+  const body = buildHtml(state.selectedId, [1]);
+  const selectedNote = notes.find(n => n.id === state.selectedId);
+  const pageTitle = selectedNote?.title || "メモ";
+
+  const escaped = pageTitle.replace(/&/g,"&amp;").replace(/</g,"&lt;");
+  const html = `<!DOCTYPE html><html lang="ja"><head><meta charset="utf-8">
+    <title>${escaped}</title>
+    <style>
+      body{font-family:system-ui,sans-serif;padding:32px;max-width:900px;margin:0 auto;color:#1f2937;background:#fff}
+      @media print{body{padding:0}}
+    </style></head><body>
+    <h1 style="font-size:22px;font-weight:bold;margin-bottom:24px;padding-bottom:12px;border-bottom:2px solid #e5e7eb">
+      ${escaped}
+    </h1>
+    ${body}
+  </body></html>`;
+
+  const win = window.open("", "_blank");
+  if (!win) { showToast("ポップアップがブロックされました。ブラウザの設定を確認してください。"); return; }
+  win.document.write(html);
+  win.document.close();
+  win.addEventListener("load", () => { win.print(); });
+  showToast("印刷ダイアログで「PDFに保存」を選択してください。");
+}
+
+// マインドマップ → PNG（Canvas描画）
+function downloadMindMapAsPng() {
+  if (!state.mindMap) return;
+  const nodes = getMindMapNodes();
+  const layout = calculateMindMapLayout();
+  if (layout.size === 0) return;
+
+  const NW = 180, NH = 52, R = 14, PAD = 72;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const [, p] of layout) {
+    minX = Math.min(minX, p.x - NW / 2);
+    minY = Math.min(minY, p.y - NH / 2);
+    maxX = Math.max(maxX, p.x + NW / 2);
+    maxY = Math.max(maxY, p.y + NH / 2);
+  }
+  const ox = -minX + PAD, oy = -minY + PAD;
+  const cw = maxX - minX + PAD * 2;
+  const ch = maxY - minY + PAD * 2;
+
+  const dpr = 2; // 高解像度
+  const canvas = document.createElement("canvas");
+  canvas.width = cw * dpr;
+  canvas.height = ch * dpr;
+  const ctx = canvas.getContext("2d");
+  ctx.scale(dpr, dpr);
+
+  // 背景
+  ctx.fillStyle = "#f8fafc";
+  ctx.fillRect(0, 0, cw, ch);
+
+  // 角丸矩形ユーティリティ
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + w - r, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+    ctx.lineTo(x + w, y + h - r);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    ctx.lineTo(x + r, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+    ctx.lineTo(x, y + r);
+    ctx.quadraticCurveTo(x, y, x + r, y);
+    ctx.closePath();
+  }
+
+  // リンク線（ベジェ）
+  for (const node of nodes) {
+    if (!node.parent_id) continue;
+    const p = layout.get(node.parent_id);
+    const c = layout.get(node.id);
+    if (!p || !c) continue;
+    const lc = node.link_color || null;
+    ctx.strokeStyle = lc || "#94a3b8";
+    ctx.lineWidth = 2;
+    const x1 = p.x + ox + NW / 2, y1 = p.y + oy;
+    const x2 = c.x + ox - NW / 2, y2 = c.y + oy;
+    const mx = (x1 + x2) / 2;
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.bezierCurveTo(mx, y1, mx, y2, x2, y2);
+    ctx.stroke();
+  }
+
+  // ノード
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  for (const node of nodes) {
+    const p = layout.get(node.id);
+    if (!p) continue;
+    const nx = p.x + ox - NW / 2, ny = p.y + oy - NH / 2;
+    const isRoot = node.parent_id === null;
+    const fill = node.fill_color || (isRoot ? "#2563eb" : "#ffffff");
+    const border = node.border_color || (isRoot ? "#2563eb" : "#e2e8f0");
+
+    // 影
+    ctx.save();
+    ctx.shadowColor = "rgba(15,23,42,0.10)";
+    ctx.shadowBlur = 8;
+    ctx.shadowOffsetY = 2;
+    roundRect(nx, ny, NW, NH, R);
+    ctx.fillStyle = fill;
+    ctx.fill();
+    ctx.restore();
+
+    // 枠線
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = border;
+    roundRect(nx, ny, NW, NH, R);
+    ctx.stroke();
+
+    // テキスト
+    const textColor = node.fill_color
+      ? "#1f2937"
+      : (isRoot ? "#ffffff" : "#1f2937");
+    ctx.fillStyle = textColor;
+    ctx.font = `${isRoot ? "bold " : ""}14px system-ui,sans-serif`;
+    const maxW = NW - 24;
+    let txt = node.title || "";
+    if (ctx.measureText(txt).width > maxW) {
+      while (ctx.measureText(txt + "…").width > maxW && txt.length > 0) txt = txt.slice(0, -1);
+      txt += "…";
+    }
+    ctx.fillText(txt, p.x + ox, p.y + oy);
+  }
+
+  canvas.toBlob(blob => {
+    if (!blob) { showToast("PNG生成に失敗しました。"); return; }
+    const name = safeFilename(state.mindMap?.title);
+    triggerBlobDownload(blob, `${name}.png`);
+    showToast("PNGをダウンロードしました。");
+  }, "image/png");
+}
+
+// ── /ダウンロードユーティリティ ────────────────────────────
+
 function showToast(message) {
   els.toast.textContent = message;
   els.toast.classList.add("show");
@@ -340,6 +576,177 @@ function toggleLargeEditor() {
   setLargeEditorOpen(!els.editorArea.classList.contains("is-large-editor"));
 }
 
+let managementReturnFocus = null;
+let managementHowToMode = "memo";
+
+function showAppHowToView(mode, shouldFocus = false) {
+  const showMindMap = mode === "mindmap";
+  managementHowToMode = showMindMap ? "mindmap" : "memo";
+  if (els.appNoteHowToPanel) els.appNoteHowToPanel.hidden = showMindMap;
+  if (els.appMindMapHowToPanel) els.appMindMapHowToPanel.hidden = !showMindMap;
+  els.appNoteHowToTab?.setAttribute("aria-selected", String(!showMindMap));
+  els.appMindMapHowToTab?.setAttribute("aria-selected", String(showMindMap));
+  if (els.appNoteHowToTab) els.appNoteHowToTab.tabIndex = showMindMap ? -1 : 0;
+  if (els.appMindMapHowToTab) els.appMindMapHowToTab.tabIndex = showMindMap ? 0 : -1;
+  if (shouldFocus) {
+    const activeTab = showMindMap ? els.appMindMapHowToTab : els.appNoteHowToTab;
+    requestAnimationFrame(() => activeTab?.focus());
+  }
+}
+
+function showAppManagementHome(shouldFocus = false) {
+  if (els.appManagementDialog) els.appManagementDialog.hidden = false;
+  if (els.appHowToDialog) els.appHowToDialog.hidden = true;
+  if (els.appInfoDialog) els.appInfoDialog.hidden = true;
+  if (els.appAccountDialog) els.appAccountDialog.hidden = true;
+  els.appHowToBtn?.setAttribute("aria-expanded", "false");
+  els.appDataInfoBtn?.setAttribute("aria-expanded", "false");
+  els.appAccountBtn?.setAttribute("aria-expanded", "false");
+  els.appCreatorInfoBtn?.setAttribute("aria-expanded", "false");
+  els.appContactBtn?.setAttribute("aria-expanded", "false");
+  els.accountBtn?.setAttribute("aria-expanded", "false");
+  els.mindMapAccountBtn?.setAttribute("aria-expanded", "false");
+  if (shouldFocus) requestAnimationFrame(() => els.appHowToBtn?.focus());
+}
+
+function openAppHowTo() {
+  if (!els.appManagementDialog || !els.appHowToDialog) return;
+  showAppHowToView(managementHowToMode);
+  els.appManagementDialog.hidden = true;
+  els.appHowToDialog.hidden = false;
+  els.appHowToBtn?.setAttribute("aria-expanded", "true");
+  requestAnimationFrame(() => els.appHowToBack?.focus());
+}
+
+function openAppInfo(section) {
+  if (!els.appManagementDialog || !els.appInfoDialog) return;
+  const info = {
+    data: { title: "データについて", panel: els.appDataInfoPanel, button: els.appDataInfoBtn },
+    creator: { title: "制作者情報", panel: els.appCreatorInfoPanel, button: els.appCreatorInfoBtn },
+    contact: { title: "お問い合わせ", panel: els.appContactPanel, button: els.appContactBtn },
+  }[section];
+  if (!info) return;
+
+  [els.appDataInfoPanel, els.appCreatorInfoPanel, els.appContactPanel].forEach(panel => {
+    if (panel) panel.hidden = panel !== info.panel;
+  });
+  [els.appDataInfoBtn, els.appCreatorInfoBtn, els.appContactBtn].forEach(button => {
+    button?.setAttribute("aria-expanded", String(button === info.button));
+  });
+  if (els.appInfoTitle) els.appInfoTitle.textContent = info.title;
+  els.appManagementDialog.hidden = true;
+  els.appInfoDialog.hidden = false;
+  requestAnimationFrame(() => els.appInfoBack?.focus());
+}
+
+function hideAppAccountNameEditor() {
+  if (els.appAccountNameEditRow) els.appAccountNameEditRow.hidden = true;
+  if (els.appAccountEditDisplayNameBtn) els.appAccountEditDisplayNameBtn.hidden = false;
+}
+
+function showAppAccountNameEditor() {
+  if (!auth?.currentUser) return;
+  els.appAccountDisplayNameInput.value = auth.currentUser.displayName || "";
+  els.appAccountNameEditRow.hidden = false;
+  els.appAccountEditDisplayNameBtn.hidden = true;
+  els.appAccountDisplayNameInput.focus();
+}
+
+function openAppAccount() {
+  if (!els.appManagementDialog || !els.appAccountDialog) return;
+  updateAccountUI(auth?.currentUser);
+  hideAppAccountNameEditor();
+  els.appManagementDialog.hidden = true;
+  els.appAccountDialog.hidden = false;
+  els.appAccountBtn?.setAttribute("aria-expanded", "true");
+  requestAnimationFrame(() => els.appAccountBack?.focus());
+}
+
+function openAppAccountFromAnchor(anchor) {
+  openAppManagement(anchor);
+  openAppAccount();
+}
+
+async function handleSaveAppAccountDisplayName() {
+  const user = auth?.currentUser;
+  if (!user) return;
+  const name = els.appAccountDisplayNameInput.value.trim();
+  els.appAccountDisplayNameSaveBtn.disabled = true;
+  els.appAccountDisplayNameCancelBtn.disabled = true;
+  try {
+    await user.updateProfile({ displayName: name || null });
+    updateAccountUI(user);
+    hideAppAccountNameEditor();
+    showToast("表示名を変更しました。");
+  } catch (err) {
+    showToast(translateAuthError(err));
+  } finally {
+    els.appAccountDisplayNameSaveBtn.disabled = false;
+    els.appAccountDisplayNameCancelBtn.disabled = false;
+  }
+}
+
+function openAppManagement(anchor) {
+  closeMemoSettingsPanel();
+  closeMemoFormatPanel();
+  closeNoteListPanel();
+  closeMindMapSettingsPanel();
+  closeMindMapNodeSettingsPanel();
+  closeMindMapListPanel();
+  closeMobileMenu();
+  hideCtxMenu();
+  hideMediaCtxMenu();
+  hideMindMapCtxMenu();
+  if (els.accountMenu) els.accountMenu.hidden = true;
+
+  managementReturnFocus = anchor || null;
+  managementHowToMode = [els.mindMapManageBtn, els.mindMapAccountBtn].includes(anchor)
+    ? "mindmap"
+    : "memo";
+  showAppManagementHome();
+  els.appManagementOverlay.hidden = false;
+  document.body.classList.add("has-management-open");
+  els.appManageBtn?.setAttribute("aria-expanded", String(anchor === els.appManageBtn));
+  els.mindMapManageBtn?.setAttribute("aria-expanded", String(anchor === els.mindMapManageBtn));
+  els.accountBtn?.setAttribute("aria-expanded", String(anchor === els.accountBtn));
+  els.mindMapAccountBtn?.setAttribute("aria-expanded", String(anchor === els.mindMapAccountBtn));
+  requestAnimationFrame(() => els.appManagementClose?.focus());
+}
+
+function closeAppManagement() {
+  if (!els.appManagementOverlay || els.appManagementOverlay.hidden) return;
+  els.appManagementOverlay.hidden = true;
+  showAppManagementHome();
+  document.body.classList.remove("has-management-open");
+  els.appManageBtn?.setAttribute("aria-expanded", "false");
+  els.mindMapManageBtn?.setAttribute("aria-expanded", "false");
+  els.accountBtn?.setAttribute("aria-expanded", "false");
+  els.mindMapAccountBtn?.setAttribute("aria-expanded", "false");
+  const returnFocus = managementReturnFocus;
+  managementReturnFocus = null;
+  returnFocus?.focus();
+}
+
+els.appManageBtn?.addEventListener("click", () => openAppManagement(els.appManageBtn));
+els.mindMapManageBtn?.addEventListener("click", () => openAppManagement(els.mindMapManageBtn));
+els.appManagementClose?.addEventListener("click", closeAppManagement);
+els.appHowToBtn?.addEventListener("click", openAppHowTo);
+els.appHowToBack?.addEventListener("click", () => showAppManagementHome(true));
+els.appHowToClose?.addEventListener("click", closeAppManagement);
+els.appNoteHowToTab?.addEventListener("click", () => showAppHowToView("memo", true));
+els.appMindMapHowToTab?.addEventListener("click", () => showAppHowToView("mindmap", true));
+els.appDataInfoBtn?.addEventListener("click", () => openAppInfo("data"));
+els.appAccountBtn?.addEventListener("click", openAppAccount);
+els.appAccountBack?.addEventListener("click", () => showAppManagementHome(true));
+els.appAccountClose?.addEventListener("click", closeAppManagement);
+els.appCreatorInfoBtn?.addEventListener("click", () => openAppInfo("creator"));
+els.appContactBtn?.addEventListener("click", () => openAppInfo("contact"));
+els.appInfoBack?.addEventListener("click", () => showAppManagementHome(true));
+els.appInfoClose?.addEventListener("click", closeAppManagement);
+els.appManagementOverlay?.addEventListener("click", e => {
+  if (e.target === els.appManagementOverlay) closeAppManagement();
+});
+
 function suppressTreeClickAfterDrag() {
   state.suppressTreeClickUntil = Date.now() + 700;
 }
@@ -365,6 +772,51 @@ function setButtonContent(button, icon, label = "") {
                      (label ? `<span class="btn-label">${label}</span>` : "");
 }
 
+const SYNC_PAIR_STYLES = [
+  { color: "#2563eb", soft: "#dbeafe" },
+  { color: "#7c3aed", soft: "#ede9fe" },
+  { color: "#0f766e", soft: "#ccfbf1" },
+  { color: "#c2410c", soft: "#ffedd5" },
+  { color: "#be185d", soft: "#fce7f3" },
+  { color: "#0369a1", soft: "#e0f2fe" },
+  { color: "#4338ca", soft: "#e0e7ff" },
+  { color: "#4d7c0f", soft: "#ecfccb" },
+  { color: "#a21caf", soft: "#fae8ff" },
+  { color: "#92400e", soft: "#fef3c7" },
+];
+
+function getSyncPairStyle(mapId) {
+  const value = String(mapId || "");
+  let hash = 0;
+  for (let i = 0; i < value.length; i += 1) hash = ((hash * 31) + value.charCodeAt(i)) | 0;
+  const index = Math.abs(hash) % SYNC_PAIR_STYLES.length;
+  return { ...SYNC_PAIR_STYLES[index], label: `同期` };
+}
+
+function applySyncPairStyle(element, mapId, enabled = true) {
+  if (!element) return;
+  element.classList.toggle("is-synced", Boolean(enabled && mapId));
+  if (!enabled || !mapId) {
+    element.style.removeProperty("--sync-pair-color");
+    element.style.removeProperty("--sync-pair-soft");
+    return;
+  }
+  const style = getSyncPairStyle(mapId);
+  element.style.setProperty("--sync-pair-color", style.color);
+  element.style.setProperty("--sync-pair-soft", style.soft);
+}
+
+function createSyncPairBadge(mapId, title = "") {
+  const style = getSyncPairStyle(mapId);
+  const badge = document.createElement("span");
+  badge.className = "sync-pair-badge";
+  badge.textContent = style.label;
+  badge.title = title || `${style.label}の同期ペア`;
+  badge.setAttribute("aria-label", badge.title);
+  applySyncPairStyle(badge, mapId);
+  return badge;
+}
+
 function isImeComposing(e, localFlag = false) {
   return Boolean(localFlag || e?.isComposing || e?.keyCode === 229);
 }
@@ -372,11 +824,13 @@ function isImeComposing(e, localFlag = false) {
 // ── Confirm modal ─────────────────────────────────────────────────────────────
 
 let _confirmResolve = null;
+let _confirmExtraResult = "add";
 
 function showConfirm(message, okLabel = "削除") {
   document.getElementById("confirmMsg").textContent = message;
   document.getElementById("confirmOk").textContent  = okLabel;
   document.getElementById("confirmExtra").hidden = true;
+  _confirmExtraResult = "add";
   els.confirmOverlay.classList.add("open");
   requestAnimationFrame(() => document.getElementById("confirmOk").focus());
   return new Promise(r => { _confirmResolve = r; });
@@ -388,6 +842,19 @@ function showReplaceMindMapConfirm(message) {
   const extra = document.getElementById("confirmExtra");
   extra.textContent = "無視して追加";
   extra.hidden = false;
+  _confirmExtraResult = "add";
+  els.confirmOverlay.classList.add("open");
+  requestAnimationFrame(() => document.getElementById("confirmOk").focus());
+  return new Promise(r => { _confirmResolve = r; });
+}
+
+function showSyncedDeleteConfirm(message, currentOnlyLabel) {
+  document.getElementById("confirmMsg").textContent = message;
+  document.getElementById("confirmOk").textContent = "同期先も削除";
+  const extra = document.getElementById("confirmExtra");
+  extra.textContent = currentOnlyLabel;
+  extra.hidden = false;
+  _confirmExtraResult = "current-only";
   els.confirmOverlay.classList.add("open");
   requestAnimationFrame(() => document.getElementById("confirmOk").focus());
   return new Promise(r => { _confirmResolve = r; });
@@ -401,7 +868,7 @@ function resolveConfirm(result) {
 
 (function initConfirmModal() {
   document.getElementById("confirmOk")    .addEventListener("click", () => resolveConfirm(true));
-  document.getElementById("confirmExtra") .addEventListener("click", () => resolveConfirm("add"));
+  document.getElementById("confirmExtra") .addEventListener("click", () => resolveConfirm(_confirmExtraResult));
   document.getElementById("confirmCancel").addEventListener("click", () => resolveConfirm(false));
   els.confirmOverlay.addEventListener("click", e => {
     if (e.target === els.confirmOverlay) resolveConfirm(false);
@@ -727,46 +1194,44 @@ function createNotesFromTemplate(node, parentId, order) {
   return created;
 }
 
-function buildMindMapFromNote(noteId, existingMap = null) {
+function buildMindMapFromNote(noteId, existingMap = null, syncEnabled = true) {
   const source = getNotes().find(n => n.id === noteId);
   if (!source) throw new Error("変換するメモが見つかりません。");
 
   const ts = nowIso();
-  const map = {
+  const baseMap = {
     id: existingMap?.id || makeId(),
     title: String(source.title || "新しいマインドマップ").slice(0, 80),
     created_at: existingMap?.created_at || ts,
     updated_at: ts,
     selected_node_id: null,
-    source_note_id: source.id,
-    source_note_title: String(source.title || "無題").slice(0, 120),
-    nodes: [],
+    source_note_id: syncEnabled ? source.id : null,
+    source_note_title: syncEnabled ? String(source.title || "無題").slice(0, 120) : "",
+    source_node_id: existingMap?.source_node_id || null,
+    sync_enabled: syncEnabled,
+    nodes: Array.isArray(existingMap?.nodes) ? existingMap.nodes : [],
+    extra_links: Array.isArray(existingMap?.extra_links) ? existingMap.extra_links : [],
   };
 
-  function addNode(note, parentId, order) {
-    const id = makeId();
-    map.nodes.push({
-      id,
-      parent_id: parentId,
-      title: String(note.title || "トピック").slice(0, 80),
-      order,
-      x: null,
-      y: null,
-      collapsed: false,
-      fill_color: null,
-      border_color: null,
-      link_color: null,
-      memo: contentToPlainText(note.content),
-    });
+  const result = NoteMindMapSync.buildSyncedMindMap({
+    notes: getNotes(),
+    rootNoteId: source.id,
+    map: baseMap,
+    createId: makeId,
+    toPlainText: contentToPlainText,
+    now: ts,
+  });
+  result.map.selected_node_id = result.map.source_node_id;
 
-    getChildren(note.id).forEach((child, index) => {
-      addNode(child, id, (index + 1) * 1000);
-    });
-    return id;
-  }
-
-  map.selected_node_id = addNode(source, null, 1000);
-  return map;
+  if (syncEnabled) return result.map;
+  return {
+    ...result.map,
+    source_note_id: null,
+    source_note_title: "",
+    source_node_id: null,
+    sync_enabled: false,
+    nodes: result.map.nodes.map(node => ({ ...node, source_note_id: null })),
+  };
 }
 
 function getMindMapRootTitleFromData(map) {
@@ -816,7 +1281,187 @@ function mapListEntryFromMindMap(map) {
     id: map.id,
     title: String(map.title || "新しいマインドマップ").slice(0, 80),
     updated_at: map.updated_at || "",
+    sync_enabled: Boolean(map.sync_enabled && map.source_note_id),
+    source_note_id: map.source_note_id || null,
+    source_note_title: String(map.source_note_title || "").slice(0, 120),
   };
+}
+
+function mindMapSavedStatus(map) {
+  if (!map) return "保存済み";
+  return map.sync_enabled
+    ? `保存済み・${getSyncPairStyle(map.id).label}でメモと同期 ${map.updated_at}`
+    : `保存済み ${map.updated_at}`;
+}
+
+function getLinkedMindMapIdForNote(note) {
+  if (!note) return null;
+  if (note.linked_mindmap_id) return note.linked_mindmap_id;
+  const chain = getNoteAncestorChain(note.id);
+  return [...chain].reverse().find(item => item.linked_mindmap_id)?.linked_mindmap_id || null;
+}
+
+async function getMindMapById(mapId) {
+  if (!mapId) return null;
+  if (state.mindMap?.id === mapId) return normalizeMindMap(serializeMindMap(), mapId);
+  const doc = await mindMapsCollection().doc(mapId).get();
+  return doc.exists ? normalizeMindMap(doc.data(), doc.id) : null;
+}
+
+async function commitNoteSyncOperations(writes, deleteIds = []) {
+  const operations = [
+    ...writes.map(note => ({ type: "set", note })),
+    ...deleteIds.map(id => ({ type: "delete", id })),
+  ];
+  const ref = notesCollection();
+  const CHUNK = 450;
+  for (let index = 0; index < operations.length; index += CHUNK) {
+    const batch = db.batch();
+    operations.slice(index, index + CHUNK).forEach(operation => {
+      if (operation.type === "delete") batch.delete(ref.doc(operation.id));
+      else batch.set(ref.doc(operation.note.id), operation.note);
+    });
+    await batch.commit();
+  }
+}
+
+async function persistNoteLinksForMindMap(mapId, links) {
+  const linkedByNoteId = new Map(links.map(link => [link.noteId, link.nodeId]));
+  const writes = [];
+  for (const note of getNotes()) {
+    const nodeId = linkedByNoteId.get(note.id);
+    if (nodeId) {
+      if (note.linked_mindmap_id !== mapId || note.linked_mindmap_node_id !== nodeId) {
+        Object.assign(note, { linked_mindmap_id: mapId, linked_mindmap_node_id: nodeId });
+        writes.push(note);
+      }
+    } else if (note.linked_mindmap_id === mapId) {
+      Object.assign(note, { linked_mindmap_id: null, linked_mindmap_node_id: null });
+      writes.push(note);
+    }
+  }
+  if (writes.length > 0) await commitNoteSyncOperations(writes);
+}
+
+async function syncLinkedMindMapById(mapId) {
+  if (!mapId || !state.data) return null;
+  let map;
+  if (state.mindMap?.id === mapId) {
+    map = normalizeMindMap(serializeMindMap(), mapId);
+  } else {
+    const doc = await mindMapsCollection().doc(mapId).get();
+    if (!doc.exists) return null;
+    map = normalizeMindMap(doc.data(), doc.id);
+  }
+  if (!map.sync_enabled || !map.source_note_id) return null;
+
+  const result = NoteMindMapSync.buildSyncedMindMap({
+    notes: getNotes(),
+    rootNoteId: map.source_note_id,
+    map,
+    createId: makeId,
+    toPlainText: contentToPlainText,
+    now: nowIso(),
+  });
+  await mindMapsCollection().doc(mapId).set(result.map, { merge: true });
+  await persistNoteLinksForMindMap(mapId, result.links);
+
+  if (state.mindMap?.id === mapId) {
+    state.mindMap = normalizeMindMap(result.map, mapId);
+    state.mindMapSelectedId = getMindMapNode(state.mindMapSelectedId)
+      ? state.mindMapSelectedId
+      : state.mindMap.selected_node_id;
+  }
+  const entry = state.mindMapList.find(item => item.id === mapId);
+  if (entry) Object.assign(entry, mapListEntryFromMindMap(result.map));
+  return result.map;
+}
+
+async function syncLinkedMindMapForNote(note, additionalMapIds = []) {
+  const mapIds = new Set(additionalMapIds.filter(Boolean));
+  const linkedId = getLinkedMindMapIdForNote(note);
+  if (linkedId) mapIds.add(linkedId);
+  for (const mapId of mapIds) await syncLinkedMindMapById(mapId);
+}
+
+async function syncLinkedNotesFromMindMap(map = state.mindMap) {
+  if (!map?.sync_enabled || !map.source_note_id || !state.data) return map?.source_note_id || null;
+  const beforeNodeLinks = JSON.stringify((map.nodes || []).map(node => [node.id, node.source_note_id || null]));
+  const plan = NoteMindMapSync.planSyncedNotes({
+    notes: getNotes(),
+    map,
+    createId: makeId,
+    toPlainText: contentToPlainText,
+    now: nowIso(),
+  });
+  await commitNoteSyncOperations(plan.writes, plan.deleteIds);
+
+  if (plan.deleteIds.length > 0) {
+    const deleted = new Set(plan.deleteIds);
+    state.data.notes = state.data.notes.filter(note => !deleted.has(note.id));
+    plan.deleteIds.forEach(id => state.unlockedNoteIds.delete(id));
+    if (deleted.has(state.selectedId)) state.selectedId = plan.map.source_note_id;
+  }
+  plan.writes.forEach(note => {
+    const index = state.data.notes.findIndex(item => item.id === note.id);
+    if (index >= 0) state.data.notes[index] = note;
+    else state.data.notes.push(note);
+  });
+
+  const afterNodeLinks = JSON.stringify((plan.map.nodes || []).map(node => [node.id, node.source_note_id || null]));
+  if (beforeNodeLinks !== afterNodeLinks || map.source_node_id !== plan.map.source_node_id) {
+    await mindMapsCollection().doc(map.id).set({
+      source_note_id: plan.map.source_note_id,
+      source_note_title: plan.map.source_note_title,
+      source_node_id: plan.map.source_node_id,
+      sync_enabled: true,
+      nodes: plan.map.nodes,
+    }, { merge: true });
+  }
+  if (state.mindMap?.id === map.id) {
+    state.mindMap = normalizeMindMap(plan.map, map.id);
+    state.mindMapSelectedId = getMindMapNode(state.mindMapSelectedId)
+      ? state.mindMapSelectedId
+      : state.mindMap.selected_node_id;
+  }
+  const entry = state.mindMapList.find(item => item.id === map.id);
+  if (entry) Object.assign(entry, mapListEntryFromMindMap(plan.map));
+  return plan.map.source_note_id;
+}
+
+async function unlinkMindMap(mapId) {
+  if (!mapId) return;
+  let map = null;
+  if (state.mindMap?.id === mapId) map = serializeMindMap();
+  else {
+    const doc = await mindMapsCollection().doc(mapId).get();
+    if (doc.exists) map = { id: doc.id, ...doc.data() };
+  }
+  if (map) {
+    const updates = {
+      source_note_id: null,
+      source_note_title: "",
+      source_node_id: null,
+      sync_enabled: false,
+      nodes: (map.nodes || []).map(node => ({ ...node, source_note_id: null })),
+      updated_at: nowIso(),
+    };
+    await mindMapsCollection().doc(mapId).set(updates, { merge: true });
+    if (state.mindMap?.id === mapId) {
+      state.mindMap = normalizeMindMap({ ...map, ...updates }, mapId);
+      state.mindMapSelectedId = state.mindMap.selected_node_id;
+    }
+    const entry = state.mindMapList.find(item => item.id === mapId);
+    if (entry) Object.assign(entry, mapListEntryFromMindMap({ ...map, ...updates, id: mapId }));
+  }
+
+  const writes = [];
+  getNotes().forEach(note => {
+    if (note.linked_mindmap_id !== mapId) return;
+    Object.assign(note, { linked_mindmap_id: null, linked_mindmap_node_id: null });
+    writes.push(note);
+  });
+  if (writes.length > 0) await commitNoteSyncOperations(writes);
 }
 
 async function refreshMindMapListEntries() {
@@ -841,15 +1486,17 @@ async function convertSelectedNoteToMindMap(noteId = state.selectedId) {
 
     const existing = await findExistingMindMapForNote(selected);
     let replaceTarget = null;
+    let syncEnabled = true;
     if (existing) {
       const decision = await showReplaceMindMapConfirm(
         `「${selected.title || "無題"}」から作成したマインドマップがあります。置き換えますか？`,
       );
       if (decision === false) return;
       if (decision === true) replaceTarget = { id: existing.id, ...existing.data };
+      if (decision === "add") syncEnabled = false;
     }
 
-    const map = buildMindMapFromNote(selected.id, replaceTarget);
+    const map = buildMindMapFromNote(selected.id, replaceTarget, syncEnabled);
     await mindMapsCollection().doc(map.id).set(map);
     await refreshMindMapListEntries();
 
@@ -857,6 +1504,7 @@ async function convertSelectedNoteToMindMap(noteId = state.selectedId) {
     state.mindMapSelectedId = state.mindMap.selected_node_id;
     state.mindMapLoaded = true;
     state.mindMapCentered = false;
+    if (syncEnabled) await syncLinkedMindMapById(map.id);
     clearMindMapUndoStack();
     closeMobileMenu();
     closeTemplatesPanel();
@@ -867,8 +1515,10 @@ async function convertSelectedNoteToMindMap(noteId = state.selectedId) {
     els.mindMapOverlay.hidden = false;
     renderMindMap();
     centerMindMap();
-    els.mindMapStatus.textContent = `保存済み ${state.mindMap.updated_at}`;
-    showToast(replaceTarget ? "マインドマップを置き換えました。" : "メモをマインドマップに変換しました。");
+    els.mindMapStatus.textContent = mindMapSavedStatus(state.mindMap);
+    showToast(syncEnabled
+      ? (replaceTarget ? "マインドマップを置き換えて同期しました。" : "メモとマインドマップを同期しました。")
+      : "独立したマインドマップを追加しました。");
   } catch (e) {
     showToast(e.message);
   }
@@ -893,17 +1543,33 @@ async function convertCurrentMindMapToNotes(rootNodeId = null) {
       return;
     }
 
-    const tree = buildNoteTreeFromMindMapNode(root);
-    const created = createNotesFromTemplate(tree, null, nextOrderForNewNote(null));
-    await writeNotesBatch(created);
+    const isDifferentLinkedSubtree = Boolean(
+      rootNodeId && state.mindMap.sync_enabled && state.mindMap.source_node_id !== root.id
+    );
+    if (isDifferentLinkedSubtree) {
+      const tree = buildNoteTreeFromMindMapNode(root);
+      const created = createNotesFromTemplate(tree, null, nextOrderForNewNote(null));
+      await writeNotesBatch(created);
+      state.data.notes.push(...created);
+      await closeMindMapPanel();
+      selectNote(created[0].id);
+      showToast("選択したノードを独立したメモに変換しました。");
+      return;
+    }
 
-    state.data.notes.push(...created);
-    created.forEach(note => {
-      if (created.some(child => child.parent_id === note.id)) state.expanded.add(note.id);
-    });
-    closeMindMapPanel();
-    selectNote(created[0].id);
-    showToast("マインドマップをメモに変換しました。");
+    if (!state.mindMap.sync_enabled || !state.mindMap.source_note_id) {
+      state.mindMap.sync_enabled = true;
+      state.mindMap.source_note_id = root.source_note_id || makeId();
+      state.mindMap.source_node_id = root.id;
+      root.source_note_id = state.mindMap.source_note_id;
+      if (root.parent_id === null) state.mindMap.title = root.title;
+      await mindMapsCollection().doc(state.mindMap.id).set(serializeMindMap(), { merge: true });
+    }
+    const linkedRootId = await syncLinkedNotesFromMindMap(state.mindMap);
+    getNoteAncestorChain(linkedRootId).forEach(note => state.expanded.add(note.id));
+    await closeMindMapPanel();
+    selectNote(linkedRootId);
+    showToast("マインドマップとメモを同期しました。");
   } catch (e) {
     showToast(e.message);
   }
@@ -1428,6 +2094,43 @@ function snapshotDeletedNotes(noteId) {
   };
 }
 
+async function deleteNoteDocuments(deleteIds) {
+  const ref = notesCollection();
+  const CHUNK = 450;
+  for (let i = 0; i < deleteIds.length; i += CHUNK) {
+    const batch = db.batch();
+    deleteIds.slice(i, i + CHUNK).forEach(id => batch.delete(ref.doc(id)));
+    await batch.commit();
+  }
+}
+
+async function deleteNoteDocumentsWithMindMaps(deleteIds, mapIds) {
+  const uniqueMapIds = [...new Set(mapIds.filter(Boolean))];
+  if (deleteIds.length + uniqueMapIds.length <= 450) {
+    const batch = db.batch();
+    const noteRef = notesCollection();
+    deleteIds.forEach(id => batch.delete(noteRef.doc(id)));
+    uniqueMapIds.forEach(id => batch.delete(mindMapsCollection().doc(id)));
+    await batch.commit();
+    return;
+  }
+  await deleteNoteDocuments(deleteIds);
+  for (const id of uniqueMapIds) await mindMapsCollection().doc(id).delete();
+}
+
+function removeDeletedNotesFromState(deleteIds, preferredSelectionId = null) {
+  const deleted = new Set(deleteIds);
+  state.data.notes = state.data.notes.filter(note => !deleted.has(note.id));
+  deleteIds.forEach(id => state.unlockedNoteIds.delete(id));
+  if (!state.selectedId || deleted.has(state.selectedId) || !getSelectedNote()) {
+    const preferred = preferredSelectionId
+      ? getNotes().find(note => note.id === preferredSelectionId)
+      : null;
+    const firstRoot = getNotes().find(note => note.parent_id === null) || null;
+    state.selectedId = preferred?.id || firstRoot?.id || null;
+  }
+}
+
 function snapshotsEqual(a, b) {
   return !!a && !!b &&
     a.noteId === b.noteId &&
@@ -1519,6 +2222,23 @@ async function restoreDeletedNotes(snapshot) {
     }
     await batch.commit();
     state.data.notes.push(...cloneData(snapshot.notes));
+    const restoredRoot = state.data.notes.find(note => note.id === snapshot.noteId);
+    if (restoredRoot?.linked_mindmap_id) {
+      const mapId = restoredRoot.linked_mindmap_id;
+      const doc = await mindMapsCollection().doc(mapId).get();
+      if (doc.exists) {
+        const mapData = doc.data();
+        if ((!mapData.sync_enabled || !mapData.source_note_id) && restoredRoot.parent_id === null) {
+          await mindMapsCollection().doc(mapId).set({
+            source_note_id: restoredRoot.id,
+            source_note_title: restoredRoot.title || "無題",
+            source_node_id: restoredRoot.linked_mindmap_node_id || mapData.source_node_id || null,
+            sync_enabled: true,
+          }, { merge: true });
+        }
+        await syncLinkedMindMapById(mapId);
+      }
+    }
     state.selectedId = snapshot.noteId;
     selectNote(snapshot.noteId);
     showToast("削除したメモを復元しました。");
@@ -2074,16 +2794,28 @@ function renderNoteList() {
     const item = document.createElement("li");
     item.className = `mindmap-list-item${note.id === activeRootId ? " is-active" : ""}`;
     item.dataset.id = note.id;
+    if (note.linked_mindmap_id) applySyncPairStyle(item, note.linked_mindmap_id);
 
     const openBtn = document.createElement("button");
     openBtn.type = "button";
     openBtn.className = "mindmap-list-open";
     openBtn.dataset.action = "open";
 
+    const titleLine = document.createElement("span");
+    titleLine.className = "mindmap-list-title-line";
+
     const title = document.createElement("span");
     title.className = "mindmap-list-title";
     title.textContent = note.title || "無題";
-    openBtn.appendChild(title);
+    titleLine.appendChild(title);
+    if (note.linked_mindmap_id) {
+      const mapTitle = state.mindMapList.find(map => map.id === note.linked_mindmap_id)?.title;
+      titleLine.appendChild(createSyncPairBadge(
+        note.linked_mindmap_id,
+        mapTitle ? `マインドマップ「${mapTitle}」と同期中` : "マインドマップと同期中",
+      ));
+    }
+    openBtn.appendChild(titleLine);
 
     const date = document.createElement("span");
     date.className = "mindmap-list-date";
@@ -2228,6 +2960,7 @@ function renderNode(note, treeCtx) {
   row.className  = `tree-row${note.id === state.selectedId ? " active" : ""}${note.pinned ? " pinned" : ""}${note.checked ? " checked" : ""}${note.locked ? " locked" : ""}${lockedClosed ? " locked-closed" : ""}`;
   row.draggable  = !lockedClosed;
   row.dataset.id = note.id;
+  if (note.linked_mindmap_id) applySyncPairStyle(row, note.linked_mindmap_id);
 
   const toggle = document.createElement("span");
   toggle.className   = "toggle";
@@ -2263,6 +2996,13 @@ function renderNode(note, treeCtx) {
   const title = document.createElement("span");
   title.className   = "tree-title";
   title.textContent = note.title || "無題";
+  if (note.linked_mindmap_id) {
+    const mapTitle = state.mindMapList.find(map => map.id === note.linked_mindmap_id)?.title;
+    titleWrap.appendChild(createSyncPairBadge(
+      note.linked_mindmap_id,
+      mapTitle ? `マインドマップ「${mapTitle}」と同期中` : "マインドマップと同期中",
+    ));
+  }
   titleWrap.appendChild(title);
 
   row.append(toggle, titleWrap);
@@ -2388,6 +3128,7 @@ function renderEditor() {
     els.contentInput.dataset.placeholder = emptyMessage;
     els.breadcrumb.textContent   = emptyMessage;
     els.selectedInfo.textContent = "";
+    applySyncPairStyle(els.selectedInfo, null, false);
     els.checkBtn.disabled = true;
     els.checkBtn.classList.remove("active");
     els.checkBtn.title = "チェックを付ける";
@@ -2439,15 +3180,66 @@ function renderEditor() {
   ensureMediaTextLines();
   els.breadcrumb.textContent = getParentChain(note).join(" / ");
   const src = note.source_file ? ` / 読み込み元: ${note.source_file}` : "";
-  els.selectedInfo.textContent = `作成: ${note.created_at} / 更新: ${note.updated_at}${src}`;
+  const syncStyle = note.linked_mindmap_id ? getSyncPairStyle(note.linked_mindmap_id) : null;
+  const sync = syncStyle ? ` / ${syncStyle.label}でマインドマップと同期中` : "";
+  els.selectedInfo.textContent = `作成: ${note.created_at} / 更新: ${note.updated_at}${src}${sync}`;
+  applySyncPairStyle(els.selectedInfo, note.linked_mindmap_id, Boolean(note.linked_mindmap_id));
   els.saveStatus.textContent   = "保存済み";
   updateEmptyState();
   updateUndoButton();
 }
 
+const AI_FILE_MAX_BYTES = 10 * 1024 * 1024;
+const AI_FILE_EXTENSIONS = new Set([
+  "txt", "md", "csv", "json", "pdf", "docx", "xlsx",
+  "png", "jpg", "jpeg", "webp", "heic", "heif",
+]);
+
+function prepareAiRequest(promptInput, fileInput, errorElement) {
+  const prompt = promptInput?.value.trim() || "";
+  const file = fileInput?.files?.[0] || null;
+  let error = "";
+
+  if (!prompt && !file) {
+    error = "テーマを入力するか、ファイルを選択してください。";
+  } else if (file?.size > AI_FILE_MAX_BYTES) {
+    error = "ファイルサイズは10MB以下にしてください。";
+  } else if (file) {
+    const extension = file.name.split(".").pop()?.toLowerCase() || "";
+    if (!AI_FILE_EXTENSIONS.has(extension)) {
+      error = "対応形式は画像（PNG・JPEG・WebP・HEIC・HEIF）と文書ファイルです。";
+    }
+  }
+
+  if (error) {
+    if (errorElement) {
+      errorElement.textContent = error;
+      errorElement.hidden = false;
+    }
+    return null;
+  }
+
+  if (!file) {
+    return {
+      prompt,
+      fetchOptions: {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt }),
+      },
+    };
+  }
+
+  const body = new FormData();
+  body.append("prompt", prompt);
+  body.append("file", file, file.name);
+  return { prompt, fetchOptions: { method: "POST", body } };
+}
+
 function openNoteAiPanel() {
   if (els.noteAiTitle)  els.noteAiTitle.value  = "";
   if (els.noteAiPrompt) els.noteAiPrompt.value = "";
+  if (els.noteAiFile)   els.noteAiFile.value = "";
   if (els.noteAiError)  els.noteAiError.hidden = true;
   if (els.noteAiGenerateBtn) els.noteAiGenerateBtn.disabled = false;
   if (els.noteAiPanel) {
@@ -2461,19 +3253,15 @@ function closeNoteAiPanel() {
 }
 
 async function generateNoteWithAI() {
-  const prompt = els.noteAiPrompt?.value.trim();
-  if (!prompt) return;
   const btn   = els.noteAiGenerateBtn;
   const errEl = els.noteAiError;
+  const requestData = prepareAiRequest(els.noteAiPrompt, els.noteAiFile, errEl);
+  if (!requestData) return;
   btn.disabled = true;
   btn.querySelector(".btn-label").textContent = "生成中...";
   if (errEl) errEl.hidden = true;
   try {
-    const res = await fetch("/api/ai-note", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt }),
-    });
+    const res = await fetch("/api/ai-note", requestData.fetchOptions);
     const json = await res.json();
     if (!res.ok) throw new Error(json.error || "生成に失敗しました");
     const tree = json.tree;
@@ -2496,7 +3284,7 @@ async function generateNoteWithAI() {
     }
   } finally {
     btn.disabled = false;
-    btn.querySelector(".btn-label").textContent = "メモを生成";
+    btn.querySelector(".btn-label").textContent = "生成";
   }
 }
 
@@ -2568,6 +3356,7 @@ async function createNote(parentId) {
     };
     await notesCollection().doc(note.id).set(note);
     state.data.notes.push(note);
+    if (pid) await syncLinkedMindMapForNote(note);
     if (parentId) state.expanded.add(parentId);
     selectNote(note.id);
     els.titleInput.focus(); els.titleInput.select();
@@ -2578,6 +3367,8 @@ async function createNote(parentId) {
 async function updateNote(id, payload, reload = true) {
   const note = state.data.notes.find(n => n.id === id);
   if (!note) throw new Error("メモが見つかりません。");
+  const previousParentId = note.parent_id;
+  const previousMapId = getLinkedMindMapIdForNote(note);
 
   const updates = {};
 
@@ -2628,6 +3419,19 @@ async function updateNote(id, payload, reload = true) {
   await notesCollection().doc(id).set(updates, { merge: true });
   Object.assign(note, updates);
 
+  if ("title" in payload || "content" in payload || "parent_id" in payload) {
+    const movedLinkedRoot = "parent_id" in payload
+      && previousParentId === null
+      && updates.parent_id !== null
+      && previousMapId;
+    if (movedLinkedRoot) await unlinkMindMap(previousMapId);
+    const targetParent = "parent_id" in payload && updates.parent_id
+      ? getNotes().find(item => item.id === updates.parent_id)
+      : null;
+    const targetMapId = getLinkedMindMapIdForNote(targetParent);
+    await syncLinkedMindMapForNote(note, [movedLinkedRoot ? null : previousMapId, targetMapId]);
+  }
+
   if (reload) {
     renderTree(); renderEditor();
   }
@@ -2653,6 +3457,10 @@ async function reorderNote(noteId, beforeId, parentId) {
     throw new Error("自分自身の下には移動できません。");
   }
 
+  const previousParentId = note.parent_id;
+  const previousMapId = getLinkedMindMapIdForNote(note);
+  const targetParent = parentId ? getNotes().find(n => n.id === parentId) : null;
+  const targetMapId = getLinkedMindMapIdForNote(targetParent);
   const order = await orderForReorder(noteId, beforeId, parentId);
   const updates = {
     parent_id:  parentId,
@@ -2663,6 +3471,9 @@ async function reorderNote(noteId, beforeId, parentId) {
 
   await notesCollection().doc(noteId).set(updates, { merge: true });
   Object.assign(note, updates);
+  const movedLinkedRoot = previousParentId === null && parentId !== null && previousMapId;
+  if (movedLinkedRoot) await unlinkMindMap(previousMapId);
+  await syncLinkedMindMapForNote(note, [movedLinkedRoot ? null : previousMapId, targetMapId]);
   return note;
 }
 
@@ -2729,8 +3540,37 @@ async function deleteSelectedNote() {
   const note = getSelectedNote();
   if (!note) return;
   if (!await ensureNoteAccess(note.id)) return;
-  const ok = await showConfirm(`「${note.title}」とその子メモを削除しますか？`);
-  if (!ok) return;
+  const initialSnapshot = snapshotDeletedNotes(note.id);
+  const initialDeleteIds = new Set(initialSnapshot.notes.map(item => item.id));
+  const relatedMapIds = [...new Set(
+    initialSnapshot.notes.map(item => item.linked_mindmap_id).filter(Boolean),
+  )];
+  let relatedMaps;
+  try {
+    relatedMaps = (await Promise.all(relatedMapIds.map(getMindMapById))).filter(Boolean);
+  } catch (e) {
+    showToast(e.message);
+    return;
+  }
+  const sourceMapsBeingRemoved = NoteMindMapSync.findSyncedMapsRemovedByNoteIds(
+    relatedMaps,
+    initialDeleteIds,
+  );
+  let deleteLinkedMaps = false;
+  if (sourceMapsBeingRemoved.length > 0) {
+    const destination = sourceMapsBeingRemoved.length > 1
+      ? `${sourceMapsBeingRemoved.length}件の同期先マインドマップ`
+      : "同期先のマインドマップ";
+    const decision = await showSyncedDeleteConfirm(
+      `「${note.title}」の削除対象には同期済みメモが含まれます。${destination}も削除しますか？`,
+      "メモだけ削除",
+    );
+    if (decision === false) return;
+    deleteLinkedMaps = decision === true;
+  } else {
+    const ok = await showConfirm(`「${note.title}」とその子メモを削除しますか？`);
+    if (!ok) return;
+  }
   try {
     await saveCurrentEditorNow();
     const target = getSelectedNote();
@@ -2738,25 +3578,33 @@ async function deleteSelectedNote() {
     const parentId = target.parent_id;
     const deleteSnapshot = snapshotDeletedNotes(target.id);
     const deleteIds = deleteSnapshot.notes.map(n => n.id);
+    const sourceMapIds = sourceMapsBeingRemoved.map(map => map.id);
+    const sourceMapIdSet = new Set(sourceMapIds);
 
-    const ref = notesCollection();
-    const CHUNK = 450;
-    for (let i = 0; i < deleteIds.length; i += CHUNK) {
-      const batch = db.batch();
-      deleteIds.slice(i, i + CHUNK).forEach(id => batch.delete(ref.doc(id)));
-      await batch.commit();
+    if (deleteLinkedMaps) await deleteNoteDocumentsWithMindMaps(deleteIds, sourceMapIds);
+    else await deleteNoteDocuments(deleteIds);
+    removeDeletedNotesFromState(deleteIds, parentId);
+    if (deleteLinkedMaps) {
+      const undoSnapshot = cloneData(deleteSnapshot);
+      undoSnapshot.notes.forEach(item => {
+        if (sourceMapIdSet.has(item.linked_mindmap_id)) {
+          item.linked_mindmap_id = null;
+          item.linked_mindmap_node_id = null;
+        }
+      });
+      pushUndoSnapshot(undoSnapshot);
+      sourceMapIds.forEach(removeMindMapFromStateAfterLinkedDelete);
+    } else {
+      pushUndoSnapshot(deleteSnapshot);
+      for (const map of sourceMapsBeingRemoved) await unlinkMindMap(map.id);
     }
-
-    state.data.notes = state.data.notes.filter(n => !deleteIds.includes(n.id));
-    deleteIds.forEach(id => state.unlockedNoteIds.delete(id));
-    pushUndoSnapshot(deleteSnapshot);
-    state.selectedId = parentId;
-    if (!state.selectedId || !getSelectedNote()) {
-      const roots = getNotes().filter(n => n.parent_id === null);
-      state.selectedId = roots.length > 0 ? roots[0].id : null;
+    for (const mapId of relatedMapIds) {
+      if (!sourceMapIdSet.has(mapId)) await syncLinkedMindMapById(mapId);
     }
     selectNote(state.selectedId);
-    showToast("削除しました。");
+    showToast(deleteLinkedMaps
+      ? "メモと同期先のマインドマップを削除しました。"
+      : "削除しました。");
   } catch (e) { showToast(e.message); }
 }
 
@@ -3076,6 +3924,7 @@ function openMindMapAiPanel() {
   closeMindMapTemplatesPanel();
   if (els.mindMapAiMapName) els.mindMapAiMapName.value = "";
   if (els.mindMapAiPrompt) els.mindMapAiPrompt.value = "";
+  if (els.mindMapAiFile) els.mindMapAiFile.value = "";
   if (els.mindMapAiError) els.mindMapAiError.hidden = true;
   if (els.mindMapAiGenerateBtn) els.mindMapAiGenerateBtn.disabled = false;
   if (els.mindMapAiPanel) {
@@ -3089,19 +3938,15 @@ function closeMindMapAiPanel() {
 }
 
 async function generateMindMapWithAI() {
-  const prompt = els.mindMapAiPrompt?.value.trim();
-  if (!prompt) return;
   const btn = els.mindMapAiGenerateBtn;
   const errEl = els.mindMapAiError;
+  const requestData = prepareAiRequest(els.mindMapAiPrompt, els.mindMapAiFile, errEl);
+  if (!requestData) return;
   btn.disabled = true;
   btn.querySelector(".btn-label").textContent = "生成中...";
   if (errEl) errEl.hidden = true;
   try {
-    const res = await fetch("/api/ai-mindmap", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt }),
-    });
+    const res = await fetch("/api/ai-mindmap", requestData.fetchOptions);
     const json = await res.json();
     if (!res.ok) throw new Error(json.error || "生成に失敗しました");
     const tree = json.tree;
@@ -3130,11 +3975,11 @@ async function generateMindMapWithAI() {
       throw e;
     }
     state.mindMapCentered = false;
-    state.mindMapList.unshift({ id: map.id, title: map.title, updated_at: map.updated_at });
+    state.mindMapList.unshift(mapListEntryFromMindMap(map));
     clearMindMapUndoStack();
     renderMindMap();
     centerMindMap();
-    if (els.mindMapStatus) els.mindMapStatus.textContent = `保存済み ${map.updated_at}`;
+    if (els.mindMapStatus) els.mindMapStatus.textContent = mindMapSavedStatus(map);
     showToast("AIマインドマップを生成しました。");
   } catch (err) {
     if (errEl) {
@@ -3142,11 +3987,11 @@ async function generateMindMapWithAI() {
       errEl.hidden = false;
     }
     btn.disabled = false;
-    btn.querySelector(".btn-label").textContent = "マインドマップを生成";
+    btn.querySelector(".btn-label").textContent = "生成";
     return;
   }
   btn.disabled = false;
-  btn.querySelector(".btn-label").textContent = "マインドマップを生成";
+  btn.querySelector(".btn-label").textContent = "生成";
 }
 
 function openMindMapTemplatesPanel() {
@@ -3221,12 +4066,12 @@ async function applyMindMapTemplate(templateId) {
     return;
   }
   state.mindMapCentered = false;
-  state.mindMapList.unshift({ id: map.id, title: map.title, updated_at: map.updated_at });
+  state.mindMapList.unshift(mapListEntryFromMindMap(map));
   clearMindMapUndoStack();
   closeMindMapTemplatesPanel();
   renderMindMap();
   centerMindMap();
-  els.mindMapStatus.textContent = `保存済み ${map.updated_at}`;
+  els.mindMapStatus.textContent = mindMapSavedStatus(map);
   showToast(`「${template.name}」テンプレートを適用しました。`);
 }
 
@@ -3460,6 +4305,10 @@ function createDefaultMindMap(id = makeId()) {
     created_at: ts,
     updated_at: ts,
     selected_node_id: rootId,
+    source_note_id: null,
+    source_note_title: "",
+    source_node_id: null,
+    sync_enabled: false,
     nodes: [{
       id: rootId,
       parent_id: null,
@@ -3472,6 +4321,7 @@ function createDefaultMindMap(id = makeId()) {
       border_color: null,
       link_color: null,
       memo: "",
+      source_note_id: null,
     }],
     extra_links: [],
   };
@@ -3494,6 +4344,7 @@ function normalizeMindMap(raw, id) {
       border_color: normalizeMindMapColor(node.border_color),
       link_color: normalizeMindMapColor(node.link_color),
       memo: String(node.memo ?? ""),
+      source_note_id: node.source_note_id ? String(node.source_note_id) : null,
     }));
 
   if (cleaned.length === 0) cleaned.push(...fallback.nodes);
@@ -3511,6 +4362,10 @@ function normalizeMindMap(raw, id) {
     selected_node_id: selected,
     source_note_id: raw?.source_note_id ? String(raw.source_note_id) : null,
     source_note_title: raw?.source_note_title ? String(raw.source_note_title).slice(0, 120) : "",
+    source_node_id: raw?.source_node_id ? String(raw.source_node_id) : null,
+    sync_enabled: raw?.sync_enabled === undefined
+      ? Boolean(raw?.source_note_id)
+      : Boolean(raw.sync_enabled && raw?.source_note_id),
     nodes: cleaned,
     extra_links: Array.isArray(raw?.extra_links)
       ? raw.extra_links
@@ -3802,6 +4657,8 @@ function serializeMindMap() {
     selected_node_id: state.mindMapSelectedId,
     source_note_id: map.source_note_id || null,
     source_note_title: map.source_note_title || "",
+    source_node_id: map.source_node_id || null,
+    sync_enabled: Boolean(map.sync_enabled && map.source_note_id),
     nodes: getMindMapNodes().map(node => ({
       id: node.id,
       parent_id: node.parent_id ?? null,
@@ -3814,6 +4671,7 @@ function serializeMindMap() {
       border_color: normalizeMindMapColor(node.border_color),
       link_color: normalizeMindMapColor(node.link_color),
       memo: node.memo || "",
+      source_note_id: node.source_note_id || null,
     })),
     extra_links: (map.extra_links || []).filter(l => l?.from_id && l?.to_id),
   };
@@ -3917,22 +4775,18 @@ async function loadMindMap() {
     state.mindMap = createDefaultMindMap();
     state.mindMapSelectedId = state.mindMap.selected_node_id;
     await mindMapsCollection().doc(state.mindMap.id).set(serializeMindMap());
-    state.mindMapList = [{ id: state.mindMap.id, title: state.mindMap.title, updated_at: state.mindMap.updated_at }];
+    state.mindMapList = [mapListEntryFromMindMap(state.mindMap)];
   } else {
     const docs = snap.docs
       .map(doc => ({ id: doc.id, data: doc.data() }))
       .sort((a, b) => String(b.data.updated_at ?? "").localeCompare(String(a.data.updated_at ?? "")));
     state.mindMap = normalizeMindMap(docs[0].data, docs[0].id);
     state.mindMapSelectedId = state.mindMap.selected_node_id;
-    state.mindMapList = docs.map(({ id, data }) => ({
-      id,
-      title: String(data.title || "新しいマインドマップ").slice(0, 80),
-      updated_at: data.updated_at || "",
-    }));
+    state.mindMapList = docs.map(({ id, data }) => mapListEntryFromMindMap({ ...data, id }));
   }
   state.mindMapLoaded = true;
   clearMindMapUndoStack();
-  els.mindMapStatus.textContent = `保存済み ${state.mindMap.updated_at}`;
+  els.mindMapStatus.textContent = mindMapSavedStatus(state.mindMap);
 }
 
 function scheduleMindMapSave() {
@@ -3949,12 +4803,15 @@ async function saveMindMapNow() {
   state.mindMap.selected_node_id = state.mindMapSelectedId;
   const listEntry = state.mindMapList.find(m => m.id === state.mindMap.id);
   if (listEntry) {
-    listEntry.title = state.mindMap.title;
-    listEntry.updated_at = state.mindMap.updated_at;
+    Object.assign(listEntry, mapListEntryFromMindMap(state.mindMap));
   }
   try {
     await mindMapsCollection().doc(state.mindMap.id).set(serializeMindMap(), { merge: true });
-    els.mindMapStatus.textContent = `保存済み ${state.mindMap.updated_at}`;
+    if (state.mindMap.sync_enabled) {
+      await syncLinkedNotesFromMindMap(state.mindMap);
+      if (!els.mindMapOverlay.hidden) renderMindMap();
+    }
+    els.mindMapStatus.textContent = mindMapSavedStatus(state.mindMap);
   } catch (e) {
     els.mindMapStatus.textContent = "保存できませんでした";
     showToast(e.message);
@@ -4153,6 +5010,12 @@ function renderMindMap() {
   state.mindMapSelectedId = selected?.id ?? null;
   state.mindMap.selected_node_id = state.mindMapSelectedId;
 
+  applySyncPairStyle(
+    els.mindMapStatus,
+    state.mindMap.id,
+    Boolean(state.mindMap.sync_enabled && state.mindMap.source_note_id),
+  );
+
   els.mindMapTitleInput.value = state.mindMap.title || "";
   els.mindMapTitleInput.disabled = presentationMode;
   els.mindMapNodeTitleInput.value = selected?.title ?? "";
@@ -4168,6 +5031,7 @@ function renderMindMap() {
   const rootCount = getMindMapNodes().filter(n => n.parent_id === null).length;
   if (els.mindMapDeleteNodeBtn) els.mindMapDeleteNodeBtn.disabled = presentationMode || !selected || (selected.parent_id === null && rootCount <= 1);
   if (els.mindMapToNoteBtn) els.mindMapToNoteBtn.disabled = presentationMode || visibleNodes.length === 0;
+  if (els.mindMapDeleteBtn) els.mindMapDeleteBtn.disabled = presentationMode || !state.mindMap;
   if (els.mindMapNodeSettingsBtn) els.mindMapNodeSettingsBtn.disabled = presentationMode || !selected;
   if (els.mindMapNewBtn) els.mindMapNewBtn.disabled = presentationMode;
   if (els.mindMapSideNewBtn) els.mindMapSideNewBtn.disabled = presentationMode;
@@ -4453,6 +5317,7 @@ function startMindMapNodeEdit(nodeId) {
         pushMindMapUndoSnapshot();
       }
       node.title = nextTitle;
+      mirrorSourceNodeTitleToMindMap(node);
       setMindMapNodeButtonContent(nodeBtn, node);
       if (state.mindMapSelectedId === nodeId) {
         els.mindMapNodeTitleInput.value = node.title;
@@ -4864,12 +5729,18 @@ async function deleteSelectedMindMapNode() {
   if (!ok) return;
   pushMindMapUndoSnapshot();
   const ids = collectMindMapSubtreeIds(selected.id);
+  const removesSyncRoot = Boolean(
+    state.mindMap.sync_enabled
+    && state.mindMap.source_node_id
+    && ids.has(state.mindMap.source_node_id)
+  );
+  if (removesSyncRoot) await unlinkMindMap(state.mindMap.id);
   state.mindMap.nodes = getMindMapNodes().filter(node => !ids.has(node.id));
   state.mindMap.extra_links = (state.mindMap.extra_links || []).filter(l => !ids.has(l.from_id) && !ids.has(l.to_id));
   state.mindMapSelectedId = selected.parent_id;
   renderMindMap();
   scheduleMindMapSave();
-  showToast("ノードを削除しました。");
+  showToast(removesSyncRoot ? "同期を解除してノードを削除しました。" : "ノードを削除しました。");
 }
 
 function formatListDate(iso) {
@@ -4893,12 +5764,12 @@ async function createNewMindMap() {
     return;
   }
   state.mindMapCentered = false;
-  state.mindMapList.unshift({ id: map.id, title: map.title, updated_at: map.updated_at });
+  state.mindMapList.unshift(mapListEntryFromMindMap(map));
   clearMindMapUndoStack();
   closeMindMapListPanel();
   renderMindMap();
   centerMindMap();
-  els.mindMapStatus.textContent = `保存済み ${map.updated_at}`;
+  els.mindMapStatus.textContent = mindMapSavedStatus(map);
   els.mindMapTitleInput.focus();
   els.mindMapTitleInput.select();
   showToast("新しいマインドマップを作成しました。");
@@ -4925,7 +5796,7 @@ async function switchMindMap(id) {
     clearMindMapUndoStack();
     renderMindMap();
     centerMindMap();
-    els.mindMapStatus.textContent = `保存済み ${state.mindMap.updated_at}`;
+    els.mindMapStatus.textContent = mindMapSavedStatus(state.mindMap);
   } catch (e) {
     showToast(e.message);
   }
@@ -4939,22 +5810,81 @@ async function convertMindMapListEntryToNotes(id) {
   await convertCurrentMindMapToNotes();
 }
 
+function removeMindMapFromStateAfterLinkedDelete(id) {
+  state.mindMapList = state.mindMapList.filter(map => map.id !== id);
+  if (state.mindMap?.id === id) {
+    clearTimeout(state.mindMapSaveTimer);
+    state.mindMap = null;
+    state.mindMapSelectedId = null;
+    state.mindMapLoaded = false;
+    clearMindMapUndoStack();
+  }
+  renderMindMapList();
+}
+
 async function deleteMindMap(id) {
   if (isMindMapPresentationMode()) return;
-  if (state.mindMapList.length <= 1) return;
-  const target = state.mindMapList.find(m => m.id === id);
-  const ok = await showConfirm(`「${target?.title || "新しいマインドマップ"}」を削除しますか？`, "削除");
-  if (!ok) return;
+  let targetMap;
   try {
-    await mindMapsCollection().doc(id).delete();
+    targetMap = await getMindMapById(id);
   } catch (e) {
     showToast(e.message);
     return;
   }
+  const target = state.mindMapList.find(map => map.id === id);
+  const title = targetMap?.title || target?.title || "新しいマインドマップ";
+  const sourceNoteId = targetMap?.sync_enabled ? targetMap.source_note_id : null;
+  let deleteLinkedNotes = false;
+  if (sourceNoteId) {
+    const decision = await showSyncedDeleteConfirm(
+      `「${title}」はメモと同期中です。同期先も削除しますか？`,
+      "マップだけ削除",
+    );
+    if (decision === false) return;
+    deleteLinkedNotes = decision === true;
+    if (deleteLinkedNotes && getNotes().some(note => note.id === sourceNoteId)) {
+      if (!await ensureNoteAccess(sourceNoteId)) return;
+    }
+  } else {
+    const ok = await showConfirm(`「${title}」を削除しますか？`, "削除");
+    if (!ok) return;
+  }
+
+  const linkedSourceNote = sourceNoteId
+    ? getNotes().find(note => note.id === sourceNoteId) || null
+    : null;
+  let linkedNoteSnapshot = null;
+  try {
+    if (deleteLinkedNotes) {
+      linkedNoteSnapshot = snapshotDeletedNotes(sourceNoteId);
+      const deleteIds = linkedNoteSnapshot.notes.map(note => note.id);
+      await deleteNoteDocumentsWithMindMaps(deleteIds, [id]);
+      removeDeletedNotesFromState(deleteIds, linkedSourceNote?.parent_id ?? null);
+    } else {
+      await unlinkMindMap(id);
+      await mindMapsCollection().doc(id).delete();
+    }
+  } catch (e) {
+    showToast(e.message);
+    return;
+  }
+  const deletedMessage = deleteLinkedNotes
+    ? "マインドマップと同期先のメモを削除しました。"
+    : "マインドマップを削除しました。";
   state.mindMapList = state.mindMapList.filter(m => m.id !== id);
   if (state.mindMap?.id === id) {
     clearTimeout(state.mindMapSaveTimer);
     const next = state.mindMapList[0];
+    if (!next) {
+      state.mindMap = null;
+      state.mindMapSelectedId = null;
+      state.mindMapLoaded = false;
+      clearMindMapUndoStack();
+      renderMindMapList();
+      await closeMindMapPanel();
+      showToast(deletedMessage);
+      return;
+    }
     try {
       const doc = await mindMapsCollection().doc(next.id).get();
       state.mindMap = normalizeMindMap(doc.data(), doc.id);
@@ -4966,10 +5896,32 @@ async function deleteMindMap(id) {
     clearMindMapUndoStack();
     renderMindMap();
     centerMindMap();
-    els.mindMapStatus.textContent = `保存済み ${state.mindMap.updated_at}`;
+    els.mindMapStatus.textContent = mindMapSavedStatus(state.mindMap);
   }
   renderMindMapList();
-  showToast("マインドマップを削除しました。");
+  showToast(deletedMessage);
+}
+
+async function renameMindMapAndSync(id, title) {
+  let map;
+  if (state.mindMap?.id === id) {
+    state.mindMap.title = title;
+    mirrorMindMapTitleToSourceNode(title);
+    await saveMindMapNow();
+    return;
+  }
+
+  const doc = await mindMapsCollection().doc(id).get();
+  if (!doc.exists) return;
+  map = normalizeMindMap(doc.data(), doc.id);
+  map.title = title;
+  map.updated_at = nowIso();
+  if (map.sync_enabled && map.source_node_id) {
+    const sourceNode = map.nodes.find(node => node.id === map.source_node_id);
+    if (sourceNode?.parent_id === null) sourceNode.title = title;
+  }
+  await mindMapsCollection().doc(id).set(map, { merge: true });
+  if (map.sync_enabled) await syncLinkedNotesFromMindMap(map);
 }
 
 function startMindMapListRename(id) {
@@ -4997,11 +5949,8 @@ function startMindMapListRename(id) {
       if (titleEl) titleEl.textContent = title;
       const dateEl = openBtn.querySelector(".mindmap-list-date");
       if (dateEl) dateEl.textContent = formatListDate(entry.updated_at);
-      if (state.mindMap?.id === id) {
-        state.mindMap.title = title;
-        els.mindMapTitleInput.value = title;
-      }
-      mindMapsCollection().doc(id).update({ title, updated_at: entry.updated_at }).catch(e => showToast(e.message));
+      if (state.mindMap?.id === id) els.mindMapTitleInput.value = title;
+      renameMindMapAndSync(id, title).catch(e => showToast(e.message));
     }
     item.classList.remove("is-editing");
     input.remove();
@@ -5033,16 +5982,29 @@ function renderMindMapList() {
     const item = document.createElement("li");
     item.className = `mindmap-list-item${entry.id === state.mindMap?.id ? " is-active" : ""}`;
     item.dataset.id = entry.id;
+    if (entry.sync_enabled && entry.source_note_id) applySyncPairStyle(item, entry.id);
 
     const openBtn = document.createElement("button");
     openBtn.type = "button";
     openBtn.className = "mindmap-list-open";
     openBtn.dataset.action = "switch";
 
+    const titleLine = document.createElement("span");
+    titleLine.className = "mindmap-list-title-line";
+
     const title = document.createElement("span");
     title.className = "mindmap-list-title";
     title.textContent = entry.title || "新しいマインドマップ";
-    openBtn.appendChild(title);
+    titleLine.appendChild(title);
+    if (entry.sync_enabled && entry.source_note_id) {
+      titleLine.appendChild(createSyncPairBadge(
+        entry.id,
+        entry.source_note_title
+          ? `メモ「${entry.source_note_title}」と同期中`
+          : "メモと同期中",
+      ));
+    }
+    openBtn.appendChild(titleLine);
 
     const date = document.createElement("span");
     date.className = "mindmap-list-date";
@@ -5225,6 +6187,7 @@ async function openMindMapPanel() {
   hideCtxMenu();
   hideMediaCtxMenu();
   els.accountMenu.hidden = true;
+  await saveCurrentEditorNow();
   els.appShell.hidden = true;
   els.mindMapOverlay.hidden = false;
   try {
@@ -5239,7 +6202,7 @@ async function openMindMapPanel() {
   }
 }
 
-function closeMindMapPanel() {
+async function closeMindMapPanel() {
   if (els.mindMapOverlay.hidden) return;
   if (els.mindMapOverlay.classList.contains("is-large-view")) setMindMapLargeView(false);
   if (isMindMapPresentationMode()) setMindMapPresentationMode(false);
@@ -5251,7 +6214,28 @@ function closeMindMapPanel() {
   closeMindMapTemplatesPanel();
   closeMindMapAiPanel();
   hideMindMapCtxMenu();
-  if (state.mindMap) saveMindMapNow();
+  if (state.mindMap) await saveMindMapNow();
+  renderTree();
+  renderEditor();
+}
+
+function mirrorMindMapTitleToSourceNode(title) {
+  if (!state.mindMap?.sync_enabled || !state.mindMap.source_node_id) return;
+  const sourceNode = getMindMapNode(state.mindMap.source_node_id);
+  if (!sourceNode || sourceNode.parent_id !== null) return;
+  sourceNode.title = String(title || "中心テーマ").slice(0, 80);
+  if (state.mindMapSelectedId === sourceNode.id && els.mindMapNodeTitleInput) {
+    els.mindMapNodeTitleInput.value = sourceNode.title;
+  }
+  const nodeEl = els.mindMapNodes.querySelector(`.mindmap-node[data-id="${sourceNode.id}"]`);
+  if (nodeEl) setMindMapNodeButtonContent(nodeEl, sourceNode);
+}
+
+function mirrorSourceNodeTitleToMindMap(node) {
+  if (!state.mindMap?.sync_enabled || !node || node.id !== state.mindMap.source_node_id) return;
+  if (node.parent_id !== null) return;
+  state.mindMap.title = String(node.title || "新しいマインドマップ").slice(0, 80);
+  if (els.mindMapTitleInput) els.mindMapTitleInput.value = state.mindMap.title;
 }
 
 function updateSelectedMindMapTitle(value) {
@@ -5259,6 +6243,7 @@ function updateSelectedMindMapTitle(value) {
   const selected = getMindMapNode(state.mindMapSelectedId);
   if (!selected) return;
   selected.title = String(value ?? "").slice(0, 80);
+  mirrorSourceNodeTitleToMindMap(selected);
   const nodeEl = els.mindMapNodes.querySelector(`.mindmap-node[data-id="${selected.id}"]`);
   if (nodeEl) setMindMapNodeButtonContent(nodeEl, selected);
   scheduleMindMapSave();
@@ -5623,11 +6608,13 @@ els.mindMapTitleInput.addEventListener("input", () => {
   if (!state.mindMap || isMindMapPresentationMode()) return;
   beginMindMapEditUndo();
   state.mindMap.title = (els.mindMapTitleInput.value || "新しいマインドマップ").slice(0, 80);
+  mirrorMindMapTitleToSourceNode(state.mindMap.title);
   scheduleMindMapSave();
 });
 els.mindMapTitleInput.addEventListener("blur", () => {
   if (!state.mindMap || isMindMapPresentationMode()) return;
   state.mindMap.title = (els.mindMapTitleInput.value.trim() || "新しいマインドマップ").slice(0, 80);
+  mirrorMindMapTitleToSourceNode(state.mindMap.title);
   els.mindMapTitleInput.value = state.mindMap.title;
   endMindMapEditUndo();
   scheduleMindMapSave();
@@ -5655,6 +6642,7 @@ els.mindMapNodeTitleInput.addEventListener("blur", () => {
     return;
   }
   selected.title = (els.mindMapNodeTitleInput.value.trim() || "トピック").slice(0, 80);
+  mirrorSourceNodeTitleToMindMap(selected);
   els.mindMapNodeTitleInput.value = selected.title;
   endMindMapEditUndo();
   renderMindMap();
@@ -5790,6 +6778,11 @@ els.mindMapNewBtn.addEventListener("click", () => {
   closeMindMapSettingsPanel();
   createNewMindMap();
 });
+els.mindMapDeleteBtn?.addEventListener("click", async () => {
+  closeMindMapSettingsPanel();
+  if (state.mindMap?.id) await deleteMindMap(state.mindMap.id);
+});
+els.downloadMapPngBtn?.addEventListener("click", () => { closeMindMapSettingsPanel(); downloadMindMapAsPng(); });
 els.mindMapLargeBtn?.addEventListener("click", toggleMindMapLargeView);
 els.mindMapSideNewBtn?.addEventListener("click", createNewMindMap);
 els.mindMapListBtn.addEventListener("click", () => {
@@ -7057,7 +8050,9 @@ function showCtxMenu(x, y, noteId) {
   const note  = getNotes().find(n => n.id === noteId);
   const accessLocked = Boolean(note) && isNoteAccessLocked(note.id);
   els.contextMenu.querySelectorAll("[data-action]").forEach(button => {
-    button.disabled = accessLocked && button.dataset.action !== "toggle-lock";
+    button.disabled = accessLocked
+      && button.dataset.action !== "toggle-lock"
+      && button.dataset.action !== "open-lock";
   });
   const pinBtn = els.contextMenu.querySelector('[data-action="toggle-pin"]');
   if (pinBtn) {
@@ -7076,6 +8071,25 @@ function showCtxMenu(x, y, noteId) {
   const siblingBottomBtn = els.contextMenu.querySelector('[data-action="move-sibling-bottom"]');
   if (siblingBottomBtn) {
     siblingBottomBtn.hidden = false;
+  }
+  const syncBtn = els.contextMenu.querySelector('[data-action="convert-mindmap"]');
+  if (syncBtn) {
+    const isSynced = Boolean(note?.linked_mindmap_id);
+    if (isSynced) {
+      const mapTitle = state.mindMapList?.find(m => m.id === note.linked_mindmap_id)?.title;
+      syncBtn.textContent = `✓　同期済み${mapTitle ? `「${mapTitle}」` : ""}`;
+      syncBtn.disabled = true;
+      syncBtn.classList.add("ctx-item-synced");
+    } else {
+      syncBtn.textContent = "⇄　マインドマップと同期";
+      syncBtn.disabled = accessLocked;
+      syncBtn.classList.remove("ctx-item-synced");
+    }
+  }
+  const openLockBtn = els.contextMenu.querySelector('[data-action="open-lock"]');
+  if (openLockBtn) {
+    const lockedAndClosed = Boolean(note?.locked) && !state.unlockedNoteIds.has(note?.id);
+    openLockBtn.hidden = !lockedAndClosed;
   }
   const lockBtn = els.contextMenu.querySelector('[data-action="toggle-lock"]');
   if (lockBtn) {
@@ -7157,6 +8171,7 @@ els.contextMenu.addEventListener("click", async e => {
     case "toggle-pin": await togglePinnedNote(id); break;
     case "move-sibling-top": await moveNoteToSiblingEdge(id, "start"); break;
     case "move-sibling-bottom": await moveNoteToSiblingEdge(id, "end"); break;
+    case "open-lock":   await openProtectedNote(id); break;
     case "toggle-lock": await toggleNoteLock(id); break;
     case "relock-note": await relockNote(id); break;
     case "delete":
@@ -7199,7 +8214,7 @@ document.addEventListener("click", e => {
     Boolean(els.mindMapListContextMenu?.contains(e.target)) ||
     Boolean(els.mindMapLinkContextMenu?.contains(e.target));
   if (mindMapMenuOpen && !clickedMindMapMenu) hideMindMapCtxMenu();
-  const accountButtonClicked = [els.accountBtn, els.mindMapAccountBtn]
+  const accountButtonClicked = [els.accountBtn, els.mindMapAccountBtn, els.appAccountBtn]
     .filter(Boolean)
     .some(button => button.contains(e.target));
   if (!els.accountMenu.hidden && !els.accountMenu.contains(e.target) && !accountButtonClicked) {
@@ -7228,6 +8243,12 @@ document.addEventListener("keydown", e => {
   if (e.key === "Escape" && !els.noteLockOverlay.hidden) {
     e.preventDefault();
     closeNoteLockPrompt(false);
+    return;
+  }
+  if (e.key === "Escape" && !els.appManagementOverlay?.hidden) {
+    e.preventDefault();
+    if (!els.appHowToDialog?.hidden || !els.appInfoDialog?.hidden || !els.appAccountDialog?.hidden) showAppManagementHome(true);
+    else closeAppManagement();
     return;
   }
   if (e.key === "Escape" && els.mindMapNodeSettingsPanel?.classList.contains("is-memo-fullscreen")) {
@@ -7353,6 +8374,7 @@ els.memoSettingsBtn?.addEventListener("click", e => {
   toggleMemoSettingsPanel();
 });
 els.memoSettingsClose?.addEventListener("click", closeMemoSettingsPanel);
+els.downloadNotesPdfBtn?.addEventListener("click", () => { closeMemoSettingsPanel(); downloadNotesAsPdf(); });
 els.noteToMindMapBtn?.addEventListener("click", () => {
   closeMemoSettingsPanel();
   convertSelectedNoteToMindMap();
@@ -7645,6 +8667,17 @@ function updateAccountUI(user) {
   els.accountMenuStatus.textContent = needsVerification ? "⚠️ メール未確認" : "✅ メール確認済み";
   els.resendVerificationBtn.hidden  = !needsVerification;
   els.refreshStatusBtn.hidden       = !needsVerification;
+  if (els.appAccountName) els.appAccountName.textContent = user.displayName || "（表示名未設定）";
+  if (els.appAccountEmail) els.appAccountEmail.textContent = user.email || "";
+  if (els.appAccountStatus) {
+    els.appAccountStatus.textContent = needsVerification ? "メール未確認" : "メール確認済み";
+  }
+  if (els.appAccountResendVerificationBtn) {
+    els.appAccountResendVerificationBtn.hidden = !needsVerification;
+  }
+  if (els.appAccountRefreshStatusBtn) {
+    els.appAccountRefreshStatusBtn.hidden = !needsVerification;
+  }
 }
 
 function showDisplayNameEditor() {
@@ -7670,7 +8703,7 @@ async function handleSaveDisplayName() {
   els.displayNameCancelBtn.disabled = true;
   try {
     await user.updateProfile({ displayName: name || null });
-    els.accountMenuName.textContent = name || "（表示名未設定）";
+    updateAccountUI(user);
     hideDisplayNameEditor();
     showToast("表示名を変更しました。");
   } catch (err) {
@@ -7819,20 +8852,6 @@ async function handleDeleteUnverifiedAccount() {
   } catch (e) { showToast(translateAuthError(e)); }
 }
 
-function toggleAccountMenu(anchor) {
-  if (!anchor) return;
-  if (els.accountMenu.hidden) {
-    const rect = anchor.getBoundingClientRect();
-    els.accountMenu.style.top   = `${rect.bottom + 6}px`;
-    els.accountMenu.style.left  = "auto";
-    els.accountMenu.style.right = `${Math.max(8, window.innerWidth - rect.right)}px`;
-    hideDisplayNameEditor();
-    els.accountMenu.hidden = false;
-  } else {
-    els.accountMenu.hidden = true;
-  }
-}
-
 if (auth) {
   els.authTabs.forEach(tab => {
     tab.addEventListener("click", () => setAuthMode(tab.dataset.authTab));
@@ -7888,8 +8907,8 @@ if (auth) {
     }
   });
 
-  els.accountBtn.addEventListener("click", () => toggleAccountMenu(els.accountBtn));
-  els.mindMapAccountBtn?.addEventListener("click", () => toggleAccountMenu(els.mindMapAccountBtn));
+  els.accountBtn.addEventListener("click", () => openAppAccountFromAnchor(els.accountBtn));
+  els.mindMapAccountBtn?.addEventListener("click", () => openAppAccountFromAnchor(els.mindMapAccountBtn));
   els.editDisplayNameBtn.addEventListener("click", showDisplayNameEditor);
   els.displayNameCancelBtn.addEventListener("click", hideDisplayNameEditor);
   els.displayNameSaveBtn.addEventListener("click", handleSaveDisplayName);
@@ -7906,6 +8925,28 @@ if (auth) {
   els.refreshStatusBtn.addEventListener("click", handleRefreshStatus);
   els.logoutBtn.addEventListener("click", handleLogout);
   els.deleteAccountBtn.addEventListener("click", handleDeleteAccount);
+  els.appAccountEditDisplayNameBtn?.addEventListener("click", showAppAccountNameEditor);
+  els.appAccountDisplayNameCancelBtn?.addEventListener("click", hideAppAccountNameEditor);
+  els.appAccountDisplayNameSaveBtn?.addEventListener("click", handleSaveAppAccountDisplayName);
+  els.appAccountDisplayNameInput?.addEventListener("keydown", e => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      handleSaveAppAccountDisplayName();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      hideAppAccountNameEditor();
+    }
+  });
+  els.appAccountResendVerificationBtn?.addEventListener("click", handleResendVerification);
+  els.appAccountRefreshStatusBtn?.addEventListener("click", handleRefreshStatus);
+  els.appAccountLogoutBtn?.addEventListener("click", () => {
+    closeAppManagement();
+    handleLogout();
+  });
+  els.appAccountDeleteBtn?.addEventListener("click", e => {
+    closeAppManagement();
+    handleDeleteAccount(e);
+  });
   els.authVerifyResendBtn.addEventListener("click", handleResendVerification);
   els.authVerifyRefreshBtn.addEventListener("click", handleRefreshStatus);
   els.authVerifyLogoutBtn.addEventListener("click", handleLogout);
