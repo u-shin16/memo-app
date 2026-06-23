@@ -18,6 +18,7 @@ const state = {
   mindMapListContextMapId: null,
   mindMapUndoStack: [],
   mindMapEditSnapshot: null,
+  mindMapInlineEditNodeId: null,
   isApplyingMindMapUndo: false,
   mindMapSaveTimer: null,
   mindMapZoom:     1,
@@ -316,13 +317,140 @@ function triggerBlobDownload(blob, filename) {
   URL.revokeObjectURL(url);
 }
 
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function escapeHtmlAttr(value) {
+  return escapeHtml(value)
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 // メモ → PDF（印刷ダイアログ経由）
 function downloadNotesAsPdf() {
   if (!state.selectedId) { showToast("メモを選択してください。"); return; }
   const notes = getNotes();
+  const selectedDraft = notes.find(n => n.id === state.selectedId);
+  if (selectedDraft && !isNoteAccessLocked(selectedDraft.id)) {
+    selectedDraft.title = els.titleInput.value;
+    selectedDraft.content = getContentHtml();
+  }
   const childrenOf = (pid) =>
     notes.filter(n => (n.parent_id ?? null) === (pid ?? null))
       .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+
+  // 画像を保持しつつスクリプト等を除去
+  function sanitizeForPrint(rawHtml) {
+    const div = document.createElement("div");
+    div.innerHTML = rawHtml || "";
+    // スクリプト・iframeを除去
+    div.querySelectorAll("script,iframe,object,embed").forEach(el => el.remove());
+    // onXxx 属性を除去
+    div.querySelectorAll("*").forEach(el => {
+      for (const attr of [...el.attributes]) {
+        if (attr.name.startsWith("on")) el.removeAttribute(attr.name);
+      }
+    });
+    // 編集用の透明アンカーはPDFでは不要なので消す
+    div.querySelectorAll(".media-caret-anchor").forEach(el => {
+      if (!el.querySelector("img,video")) el.remove();
+    });
+    // 画像を印刷サイズに収める
+    div.querySelectorAll("figure.inline-media-figure").forEach(figure => {
+      figure.removeAttribute("contenteditable");
+      figure.removeAttribute("draggable");
+      figure.style.display = "block";
+      figure.style.width = "100%";
+      figure.style.maxWidth = "100%";
+      figure.style.margin = "10px 0 14px";
+      figure.style.padding = "0";
+      figure.style.breakInside = "avoid";
+      figure.style.pageBreakInside = "avoid";
+      figure.style.lineHeight = "0";
+      figure.style.overflow = "visible";
+      figure.querySelectorAll("video").forEach(video => {
+        const label = document.createElement("div");
+        label.textContent = `動画: ${video.getAttribute("src") || ""}`;
+        label.style.fontSize = "11px";
+        label.style.color = "#6b7280";
+        label.style.lineHeight = "1.5";
+        label.style.padding = "8px 0";
+        video.replaceWith(label);
+      });
+    });
+    div.querySelectorAll("img").forEach(img => {
+      img.removeAttribute("draggable");
+      img.style.maxWidth = "100%";
+      img.style.maxHeight = "220mm";
+      img.style.width = "auto";
+      img.style.height = "auto";
+      img.style.display = "block";
+      img.style.margin = "8px 0";
+      img.style.objectFit = "contain";
+      img.style.borderRadius = "8px";
+      img.style.breakInside = "avoid";
+      img.style.pageBreakInside = "avoid";
+    });
+    return div.innerHTML;
+  }
+
+  function isPrintableImageItem(item) {
+    const type = item?.mime_type || "";
+    const filename = item?.filename || item?.original_name || "";
+    return Boolean(item?.downloadURL) &&
+      (type.startsWith("image/") || /\.(png|jpe?g|webp|gif|heic|heif)$/i.test(filename));
+  }
+
+  function mediaItemToPrintHtml(item) {
+    const src = escapeHtmlAttr(item.downloadURL);
+    const alt = escapeHtmlAttr(item.original_name || item.filename || "添付画像");
+    return `<figure class="inline-media-figure"><img src="${src}" alt="${alt}" class="inline-media"></figure>`;
+  }
+
+  function htmlIncludesMediaUrl(html, url) {
+    return Boolean(url) && (html.includes(url) || html.includes(escapeHtmlAttr(url)));
+  }
+
+  function getPrintableContent(note) {
+    let html = contentToHtml(note.content ?? "");
+    for (const item of (note.media ?? [])) {
+      if (!isPrintableImageItem(item)) continue;
+      if (htmlIncludesMediaUrl(html, item.downloadURL)) continue;
+      html += mediaItemToPrintHtml(item);
+    }
+    return sanitizeForPrint(html).trim();
+  }
+
+  function waitForPrintImages(win, timeoutMs = 7000) {
+    const images = [...win.document.images].filter(img => img.src);
+    if (images.length === 0) return Promise.resolve();
+    const waiters = images.map(img => {
+      if (img.complete && img.naturalWidth > 0) return Promise.resolve();
+      return new Promise(resolve => {
+        img.addEventListener("load", resolve, { once: true });
+        img.addEventListener("error", resolve, { once: true });
+      });
+    });
+    return Promise.race([
+      Promise.all(waiters),
+      new Promise(resolve => setTimeout(resolve, timeoutMs)),
+    ]);
+  }
+
+  function printWhenReady(win) {
+    const print = () => {
+      waitForPrintImages(win).then(() => {
+        win.focus();
+        win.print();
+      });
+    };
+    if (win.document.readyState === "complete") print();
+    else win.addEventListener("load", print, { once: true });
+  }
 
   function buildHtml(noteId, numPath) {
     const note = notes.find(n => n.id === noteId);
@@ -332,18 +460,16 @@ function downloadNotesAsPdf() {
     const numLabel = numPath.join("-");
     const check = note.checked ? " <span style='color:#16a34a'>✓</span>" : "";
     const pin = note.pinned ? " <span style='color:#dc2626'>📌</span>" : "";
-    const title = (note.title || "無題").replace(/&/g,"&amp;").replace(/</g,"&lt;");
-    const content = contentToPlainText(note.content ?? "").trim()
-      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-      .replace(/\n/g, "<br>");
+    const title = escapeHtml(note.title || "無題");
+    const content = getPrintableContent(note);
     const fontSize = Math.max(13, 20 - depth * 2);
     const numColor = depth === 0 ? "#2563eb" : "#6b7280";
-    let html = `<div style="margin-left:${indent}px;margin-bottom:12px">
+    let html = `<div style="margin-left:${indent}px;margin-bottom:16px">
       <div style="font-size:${fontSize}px;font-weight:${depth === 0 ? "bold" : "600"};color:#1f2937;display:flex;align-items:baseline;gap:8px">
         <span style="font-size:${Math.max(11, fontSize - 2)}px;color:${numColor};font-weight:bold;white-space:nowrap;min-width:2em">${numLabel}</span>
         <span>${title}${check}${pin}</span>
       </div>
-      ${content ? `<div style="font-size:13px;color:#4b5563;margin-top:4px;margin-left:${Math.max(11, fontSize - 2) * 1.2 + 8}px;line-height:1.6">${content}</div>` : ""}
+      ${content ? `<div style="font-size:13px;color:#4b5563;margin-top:6px;margin-left:${Math.max(11, fontSize - 2) * 1.2 + 8}px;line-height:1.7">${content}</div>` : ""}
     </div>`;
     childrenOf(note.id).forEach((child, i) => {
       html += buildHtml(child.id, [...numPath, i + 1]);
@@ -355,7 +481,7 @@ function downloadNotesAsPdf() {
   const selectedNote = notes.find(n => n.id === state.selectedId);
   const pageTitle = selectedNote?.title || "メモ";
 
-  const escaped = pageTitle.replace(/&/g,"&amp;").replace(/</g,"&lt;");
+  const escaped = escapeHtml(pageTitle);
   const now = new Date();
   const dateStr = `${now.getFullYear()}年${now.getMonth()+1}月${now.getDate()}日`;
   const html = `<!DOCTYPE html><html lang="ja"><head><meta charset="utf-8">
@@ -378,6 +504,10 @@ function downloadNotesAsPdf() {
         padding-bottom: 12px;
         border-bottom: 2px solid #e5e7eb;
       }
+      img {
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
     </style>
   </head><body>
     <div class="doc-header">
@@ -392,7 +522,7 @@ function downloadNotesAsPdf() {
   if (!win) { showToast("ポップアップがブロックされました。ブラウザの設定を確認してください。"); return; }
   win.document.write(html);
   win.document.close();
-  win.addEventListener("load", () => { win.print(); });
+  printWhenReady(win);
   showToast("印刷ダイアログで「PDFに保存」を選択してください。");
 }
 
@@ -1387,10 +1517,12 @@ async function syncLinkedMindMapById(mapId) {
   await persistNoteLinksForMindMap(mapId, result.links);
 
   if (state.mindMap?.id === mapId) {
-    state.mindMap = normalizeMindMap(result.map, mapId);
-    state.mindMapSelectedId = getMindMapNode(state.mindMapSelectedId)
-      ? state.mindMapSelectedId
-      : state.mindMap.selected_node_id;
+    if (!isMindMapInlineNodeEditing()) {
+      state.mindMap = normalizeMindMap(result.map, mapId);
+      state.mindMapSelectedId = getMindMapNode(state.mindMapSelectedId)
+        ? state.mindMapSelectedId
+        : state.mindMap.selected_node_id;
+    }
   }
   const entry = state.mindMapList.find(item => item.id === mapId);
   if (entry) Object.assign(entry, mapListEntryFromMindMap(result.map));
@@ -1438,7 +1570,7 @@ async function syncLinkedNotesFromMindMap(map = state.mindMap) {
       nodes: plan.map.nodes,
     }, { merge: true });
   }
-  if (state.mindMap?.id === map.id) {
+  if (state.mindMap?.id === map.id && !isMindMapInlineNodeEditing()) {
     state.mindMap = normalizeMindMap(plan.map, map.id);
     state.mindMapSelectedId = getMindMapNode(state.mindMapSelectedId)
       ? state.mindMapSelectedId
@@ -4293,8 +4425,7 @@ const MINDMAP_Y_GAP        = 92;
 const MINDMAP_NODE_HALF_W  = 86;
 const MINDMAP_ADD_CHILD_OFFSET = 0;
 const MINDMAP_ALIGN_SUBTREE_GAP = 32;
-const MINDMAP_ALIGN_COLLISION_MARGIN_X = 26;
-const MINDMAP_ALIGN_COLLISION_MARGIN_Y = 20;
+const MINDMAP_ADD_COLLISION_MARGIN = 14;
 const MINDMAP_DEFAULT_NODE_FILL = "#ffffff";
 const MINDMAP_DEFAULT_NODE_BORDER = "#3b82f6";
 const MINDMAP_ROOT_NODE_FILL = "#2563eb";
@@ -4653,12 +4784,12 @@ function getVisibleMindMapNodes() {
 
 function getMindMapAlignTarget(node = getMindMapNode(state.mindMapSelectedId)) {
   if (!node) return { parent: null, nodes: [] };
-  const children = node.collapsed ? [] : getMindMapChildren(node.id).filter(isMindMapNodeVisible);
-  if (children.length >= 2) return { parent: node, nodes: children };
-  if (node.parent_id === null) return { parent: node, nodes: children };
+  const children = getMindMapChildren(node.id);
+  return { parent: node, nodes: children };
+}
 
-  const parent = getMindMapNode(node.parent_id);
-  return { parent, nodes: getMindMapChildren(node.parent_id).filter(isMindMapNodeVisible) };
+function canAlignMindMapChildren(node = getMindMapNode(state.mindMapSelectedId)) {
+  return Boolean(node && getMindMapChildren(node.id).length >= 2);
 }
 
 function nextMindMapOrder(parentId) {
@@ -4816,9 +4947,20 @@ function scheduleMindMapSave() {
   state.mindMapSaveTimer = setTimeout(saveMindMapNow, 500);
 }
 
+function isMindMapInlineNodeEditing() {
+  return Boolean(
+    state.mindMapInlineEditNodeId &&
+    els.mindMapNodes?.querySelector(".mindmap-node-edit")
+  );
+}
+
 async function saveMindMapNow() {
   if (!state.mindMap || !state.uid) return;
   clearTimeout(state.mindMapSaveTimer);
+  if (isMindMapInlineNodeEditing()) {
+    els.mindMapStatus.textContent = "編集中...";
+    return;
+  }
   state.mindMap.updated_at = nowIso();
   state.mindMap.selected_node_id = state.mindMapSelectedId;
   const listEntry = state.mindMapList.find(m => m.id === state.mindMap.id);
@@ -4829,7 +4971,10 @@ async function saveMindMapNow() {
     await mindMapsCollection().doc(state.mindMap.id).set(serializeMindMap(), { merge: true });
     if (state.mindMap.sync_enabled) {
       await syncLinkedNotesFromMindMap(state.mindMap);
-      if (!els.mindMapOverlay.hidden) renderMindMap();
+      // ノード編集中・ドラッグ中は再描画しない（エディタが破壊されるため）
+      if (!els.mindMapOverlay.hidden && !state.mindMapEditSnapshot && !state.mindMapNodeDrag && !isMindMapInlineNodeEditing()) {
+        renderMindMap();
+      }
     }
     els.mindMapStatus.textContent = mindMapSavedStatus(state.mindMap);
   } catch (e) {
@@ -4902,6 +5047,77 @@ function calculateMindMapLayout() {
   }
 
   return layout;
+}
+
+function preserveVisibleMindMapPositions(layout = calculateMindMapLayout()) {
+  for (const node of getVisibleMindMapNodes()) {
+    const pos = layout.get(node.id);
+    if (!pos) continue;
+    node.x = pos.x;
+    node.y = pos.y;
+  }
+}
+
+function getMindMapVisibleSubtreeVerticalBounds(nodeId, layout) {
+  const ids = collectMindMapSubtreeIds(nodeId);
+  let minY = Infinity;
+  let maxY = -Infinity;
+
+  for (const id of ids) {
+    if (!layout.has(id)) continue;
+    const node = getMindMapNode(id);
+    const pos = layout.get(id);
+    if (!node || !pos) continue;
+    const halfH = estimateMindMapNodeHeight(node) / 2;
+    minY = Math.min(minY, pos.y - halfH);
+    maxY = Math.max(maxY, pos.y + halfH);
+  }
+
+  if (Number.isFinite(minY) && Number.isFinite(maxY)) return { minY, maxY };
+  const node = getMindMapNode(nodeId);
+  const pos = layout.get(nodeId) ?? { y: Number.isFinite(node?.y) ? node.y : MINDMAP_CENTER_Y };
+  const halfH = estimateMindMapNodeHeight(node) / 2;
+  return { minY: pos.y - halfH, maxY: pos.y + halfH };
+}
+
+function getMindMapNodeCollisionRect(node, pos, margin = MINDMAP_ADD_COLLISION_MARGIN) {
+  const halfW = MINDMAP_NODE_HALF_W + margin;
+  const halfH = estimateMindMapNodeHeight(node) / 2 + margin;
+  return {
+    left: pos.x - halfW,
+    right: pos.x + halfW,
+    top: pos.y - halfH,
+    bottom: pos.y + halfH,
+  };
+}
+
+function mindMapRectsOverlap(a, b) {
+  return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+}
+
+function getVisibleMindMapCollisionRects(layout, excludeIds = new Set()) {
+  return getVisibleMindMapNodes()
+    .filter(node => !excludeIds.has(node.id))
+    .map(node => {
+      const pos = getMindMapNodePosition(node, layout);
+      return pos ? getMindMapNodeCollisionRect(node, pos) : null;
+    })
+    .filter(Boolean);
+}
+
+function findNonOverlappingMindMapPosition(node, desiredPos, layout, options = {}) {
+  const excludeIds = options.excludeIds || new Set();
+  const rects = getVisibleMindMapCollisionRects(layout, excludeIds);
+  const pos = { x: desiredPos.x, y: desiredPos.y };
+
+  for (let i = 0; i < 120; i += 1) {
+    const rect = getMindMapNodeCollisionRect(node, pos);
+    const overlap = rects.find(other => mindMapRectsOverlap(rect, other));
+    if (!overlap) return pos;
+    pos.y += overlap.bottom - rect.top + 1;
+  }
+
+  return pos;
 }
 
 function applyMindMapTransform() {
@@ -5047,7 +5263,7 @@ function renderMindMap() {
   if (els.mindMapMemoLargeBtn) els.mindMapMemoLargeBtn.disabled = !selected || presentationMode;
   updateMindMapColorInputs(selected);
   if (els.mindMapAddChildBtn) els.mindMapAddChildBtn.disabled = presentationMode || !selected;
-  if (els.mindMapAlignChildrenBtn) els.mindMapAlignChildrenBtn.disabled = presentationMode || !alignTarget.parent || alignTarget.nodes.length < 2;
+  if (els.mindMapAlignChildrenBtn) els.mindMapAlignChildrenBtn.disabled = presentationMode || !canAlignMindMapChildren(alignTarget.parent);
   const rootCount = getMindMapNodes().filter(n => n.parent_id === null).length;
   if (els.mindMapDeleteNodeBtn) els.mindMapDeleteNodeBtn.disabled = presentationMode || !selected || (selected.parent_id === null && rootCount <= 1);
   if (els.mindMapToNoteBtn) els.mindMapToNoteBtn.disabled = presentationMode || visibleNodes.length === 0;
@@ -5318,6 +5534,10 @@ function startMindMapNodeEdit(nodeId) {
   const nodeBtn = els.mindMapNodes.querySelector(`.mindmap-node[data-id="${nodeId}"]`);
   if (!nodeBtn || nodeBtn.classList.contains("is-editing")) return;
 
+  clearTimeout(state.mindMapSaveTimer);
+  state.mindMapInlineEditNodeId = nodeId;
+  els.mindMapStatus.textContent = "編集中...";
+
   const input = document.createElement("input");
   input.type = "text";
   input.className = `mindmap-node-edit${node.parent_id === null ? " is-root" : ""}`;
@@ -5345,6 +5565,7 @@ function startMindMapNodeEdit(nodeId) {
       scheduleMindMapSave();
     }
     nodeBtn.classList.remove("is-editing");
+    state.mindMapInlineEditNodeId = null;
     input.remove();
   };
   input.addEventListener("compositionstart", () => { isComposing = true; });
@@ -5371,21 +5592,29 @@ function startMindMapNodeEdit(nodeId) {
 function createNewRootNode(clientX, clientY) {
   if (!state.mindMap || isMindMapPresentationMode()) return;
   const rect = els.mindMapCanvas.getBoundingClientRect();
-  const x = (clientX - rect.left - state.mindMapPanX) / state.mindMapZoom;
-  const y = (clientY - rect.top - state.mindMapPanY) / state.mindMapZoom;
+  const layout = calculateMindMapLayout();
   pushMindMapUndoSnapshot();
+  preserveVisibleMindMapPositions(layout);
+  const desiredPos = {
+    x: (clientX - rect.left - state.mindMapPanX) / state.mindMapZoom,
+    y: (clientY - rect.top - state.mindMapPanY) / state.mindMapZoom,
+  };
   const node = {
     id: makeId(),
     parent_id: null,
     title: "新しいトピック",
     order: nextMindMapOrder(null),
-    x, y,
+    x: desiredPos.x,
+    y: desiredPos.y,
     collapsed: false,
     fill_color: null,
     border_color: null,
     link_color: null,
     memo: "",
   };
+  const safePos = findNonOverlappingMindMapPosition(node, desiredPos, layout);
+  node.x = safePos.x;
+  node.y = safePos.y;
   state.mindMap.nodes.push(node);
   state.mindMapSelectedId = node.id;
   renderMindMap();
@@ -5398,19 +5627,34 @@ function addMindMapNode(parentId) {
   const parent = getMindMapNode(parentId);
   if (!parent) return;
   pushMindMapUndoSnapshot();
+  const layout = calculateMindMapLayout();
+  const parentPos = layout.get(parent.id) ?? {
+    x: Number.isFinite(parent.x) ? parent.x : MINDMAP_CENTER_X,
+    y: Number.isFinite(parent.y) ? parent.y : MINDMAP_CENTER_Y,
+  };
+  const siblings = getMindMapChildren(parent.id);
+  preserveVisibleMindMapPositions(layout);
   parent.collapsed = false;
   const node = {
     id: makeId(),
     parent_id: parent.id,
     title: "新しいトピック",
     order: nextMindMapOrder(parent.id),
-    x: null,
-    y: null,
+    x: parentPos.x + MINDMAP_X_GAP,
+    y: parentPos.y,
     fill_color: null,
     border_color: null,
     link_color: null,
     memo: "",
   };
+  if (siblings.length > 0) {
+    const lastSibling = siblings[siblings.length - 1];
+    const bounds = getMindMapVisibleSubtreeVerticalBounds(lastSibling.id, layout);
+    node.y = bounds.maxY + MINDMAP_ALIGN_SUBTREE_GAP + estimateMindMapNodeHeight(node) / 2;
+  }
+  const safePos = findNonOverlappingMindMapPosition(node, { x: node.x, y: node.y }, layout);
+  node.x = safePos.x;
+  node.y = safePos.y;
   state.mindMap.nodes.push(node);
   state.mindMapSelectedId = node.id;
   renderMindMap();
@@ -5534,6 +5778,14 @@ function estimateMindMapNodeHeight(node) {
   return Math.max(minHeight, 20 + lines * 19);
 }
 
+function getMindMapNodePosition(node, layout) {
+  if (!node) return null;
+  const layoutPos = layout.get(node.id);
+  if (layoutPos) return layoutPos;
+  if (Number.isFinite(node.x) && Number.isFinite(node.y)) return { x: node.x, y: node.y };
+  return null;
+}
+
 function getMindMapSubtreeBounds(nodeId, layout) {
   const ids = collectMindMapSubtreeIds(nodeId);
   let minY = Infinity;
@@ -5541,68 +5793,46 @@ function getMindMapSubtreeBounds(nodeId, layout) {
 
   for (const id of ids) {
     const node = getMindMapNode(id);
-    const pos = layout.get(id);
+    const pos = getMindMapNodePosition(node, layout);
     if (!node || !pos) continue;
     const halfH = estimateMindMapNodeHeight(node) / 2;
     minY = Math.min(minY, pos.y - halfH);
     maxY = Math.max(maxY, pos.y + halfH);
   }
 
-  const targetPos = layout.get(nodeId) ?? { x: MINDMAP_CENTER_X, y: MINDMAP_CENTER_Y };
+  const target = getMindMapNode(nodeId);
+  const targetPos = getMindMapNodePosition(target, layout) ?? { x: MINDMAP_CENTER_X, y: MINDMAP_CENTER_Y };
   if (!Number.isFinite(minY) || !Number.isFinite(maxY)) {
-    const node = getMindMapNode(nodeId);
-    const halfH = estimateMindMapNodeHeight(node) / 2;
+    const halfH = estimateMindMapNodeHeight(target) / 2;
     minY = targetPos.y - halfH;
     maxY = targetPos.y + halfH;
   }
 
   return {
     ids,
-    minY,
-    maxY,
-    height: maxY - minY,
+    height: Math.max(estimateMindMapNodeHeight(target), maxY - minY),
     targetOffsetY: targetPos.y - minY,
     targetPos,
   };
 }
 
-function getMindMapCollisionRect(node, pos) {
-  const halfW = MINDMAP_NODE_HALF_W + MINDMAP_ALIGN_COLLISION_MARGIN_X;
-  const halfH = estimateMindMapNodeHeight(node) / 2 + MINDMAP_ALIGN_COLLISION_MARGIN_Y;
-  return {
-    left: pos.x - halfW,
-    right: pos.x + halfW,
-    top: pos.y - halfH,
-    bottom: pos.y + halfH,
-  };
-}
-
-function offsetMindMapRect(rect, dy) {
-  return {
-    left: rect.left,
-    right: rect.right,
-    top: rect.top + dy,
-    bottom: rect.bottom + dy,
-  };
-}
-
-function mindMapRectsOverlap(a, b) {
-  return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
-}
-
-function createMindMapAlignPlans(groups, parentPos, x) {
+function createMindMapChildAlignPlans(children, parentPos, layout) {
+  const groups = children.map((node, index) => ({
+    node,
+    index,
+    ...getMindMapSubtreeBounds(node.id, layout),
+  }));
   const totalHeight = groups.reduce((sum, group) => sum + group.height, 0)
     + MINDMAP_ALIGN_SUBTREE_GAP * (groups.length - 1);
   let cursorY = parentPos.y - totalHeight / 2;
 
-  return groups.map((group, index) => {
+  return groups.map(group => {
     const targetY = cursorY + group.targetOffsetY;
     const plan = {
       ...group,
-      index,
-      targetX: x,
+      targetX: parentPos.x + MINDMAP_X_GAP,
       targetY,
-      dx: x - group.targetPos.x,
+      dx: parentPos.x + MINDMAP_X_GAP - group.targetPos.x,
       dy: targetY - group.targetPos.y,
     };
     cursorY += group.height + MINDMAP_ALIGN_SUBTREE_GAP;
@@ -5610,79 +5840,12 @@ function createMindMapAlignPlans(groups, parentPos, x) {
   });
 }
 
-function getMindMapPlanCollisionRects(plans, layout) {
-  const rects = [];
-  for (const plan of plans) {
-    for (const id of plan.ids) {
-      const node = getMindMapNode(id);
-      const pos = layout.get(id);
-      if (!node || !pos) continue;
-      rects.push(getMindMapCollisionRect(node, {
-        x: pos.x + plan.dx,
-        y: pos.y + plan.dy,
-      }));
-    }
-  }
-  return rects;
-}
-
-function getMindMapStationaryCollisionRects(layout, movingIds) {
-  return getVisibleMindMapNodes()
-    .filter(node => !movingIds.has(node.id))
-    .map(node => {
-      const pos = layout.get(node.id);
-      return pos ? getMindMapCollisionRect(node, pos) : null;
-    })
-    .filter(Boolean);
-}
-
-function findMindMapClearVerticalShift(movingRects, stationaryRects, direction) {
-  let shift = 0;
-  for (let i = 0; i < 80; i += 1) {
-    let nextShift = shift;
-    for (const movingRect of movingRects) {
-      const shifted = offsetMindMapRect(movingRect, shift);
-      for (const stationaryRect of stationaryRects) {
-        if (!mindMapRectsOverlap(shifted, stationaryRect)) continue;
-        if (direction > 0) {
-          nextShift = Math.max(nextShift, shift + stationaryRect.bottom - shifted.top + 1);
-        } else {
-          nextShift = Math.min(nextShift, shift + stationaryRect.top - shifted.bottom - 1);
-        }
-      }
-    }
-    if (nextShift === shift) return shift;
-    shift = nextShift;
-    if (Math.abs(shift) > MINDMAP_SCENE_HEIGHT) return null;
-  }
-  return null;
-}
-
-function resolveMindMapAlignCollisionShift(plans, layout) {
-  const movingIds = new Set();
-  plans.forEach(plan => {
-    for (const id of plan.ids) movingIds.add(id);
-  });
-
-  const movingRects = getMindMapPlanCollisionRects(plans, layout);
-  const stationaryRects = getMindMapStationaryCollisionRects(layout, movingIds);
-  if (movingRects.length === 0 || stationaryRects.length === 0) return 0;
-
-  const downShift = findMindMapClearVerticalShift(movingRects, stationaryRects, 1);
-  const upShift = findMindMapClearVerticalShift(movingRects, stationaryRects, -1);
-  if (downShift === 0 || upShift === 0) return 0;
-  if (downShift === null && upShift === null) return 0;
-  if (downShift === null) return upShift;
-  if (upShift === null) return downShift;
-  return Math.abs(downShift) <= Math.abs(upShift) ? downShift : upShift;
-}
-
-function alignMindMapSiblingNodes() {
+function alignMindMapChildNodes() {
   if (isMindMapPresentationMode()) return;
   const selected = getMindMapNode(state.mindMapSelectedId);
   const { parent, nodes } = getMindMapAlignTarget(selected);
   if (!parent || nodes.length < 2) {
-    showToast("整列できる同階層ノードがありません。");
+    showToast("整列できる子ノードがありません。");
     return;
   }
 
@@ -5692,34 +5855,25 @@ function alignMindMapSiblingNodes() {
     x: Number.isFinite(parent.x) ? parent.x : MINDMAP_CENTER_X,
     y: Number.isFinite(parent.y) ? parent.y : MINDMAP_CENTER_Y,
   };
-  const x = parentPos.x + MINDMAP_X_GAP;
-  const groups = nodes.map(node => ({
-    node,
-    ...getMindMapSubtreeBounds(node.id, layout),
-  }));
-  const plans = createMindMapAlignPlans(groups, parentPos, x);
-  const collisionShift = resolveMindMapAlignCollisionShift(plans, layout);
+  const plans = createMindMapChildAlignPlans(nodes, parentPos, layout);
 
   plans.forEach(plan => {
-    const dy = plan.dy + collisionShift;
-
     for (const id of plan.ids) {
       const node = getMindMapNode(id);
-      const pos = layout.get(id);
+      const pos = getMindMapNodePosition(node, layout);
       if (!node || !pos) continue;
       node.x = pos.x + plan.dx;
-      node.y = pos.y + dy;
+      node.y = pos.y + plan.dy;
     }
 
-    const node = plan.node;
-    node.order = (plan.index + 1) * 1000;
-    node.x = plan.targetX;
-    node.y = plan.targetY + collisionShift;
+    plan.node.order = (plan.index + 1) * 1000;
+    plan.node.x = plan.targetX;
+    plan.node.y = plan.targetY;
   });
 
   renderMindMap();
   scheduleMindMapSave();
-  showToast(collisionShift === 0 ? "同階層ノードを整列しました。" : "重なりを避けて同階層ノードを整列しました。");
+  showToast("子ノードを整列しました。");
 }
 
 function collectMindMapSubtreeIds(nodeId) {
@@ -6453,7 +6607,7 @@ function showMindMapCtxMenu(x, y, nodeId) {
     collapseSubtreeBtn.disabled = hiddenCount === 0 ||
       getMindMapSubtreeBranches(node.id).every(branch => branch.collapsed);
   }
-  if (alignBtn) alignBtn.disabled = !alignTarget.parent || alignTarget.nodes.length < 2;
+  if (alignBtn) alignBtn.disabled = !canAlignMindMapChildren(alignTarget.parent);
   if (undoBtn) undoBtn.disabled = state.mindMapUndoStack.length === 0;
   const isOnlyRoot = node.parent_id === null && getMindMapNodes().filter(n => n.parent_id === null).length <= 1;
   if (deleteBtn) deleteBtn.disabled = isOnlyRoot;
@@ -6581,10 +6735,18 @@ function toggleMindMapLargeView() {
   setMindMapLargeView(!els.mindMapOverlay.classList.contains("is-large-view"));
 }
 
+let _tooltipNodeId = null;
+
 function showMindMapMemoTooltip(nodeBtn, memo) {
   if (!state.mindMapMemoPreviewEnabled || !els.mindMapMemoTooltip || !memo) return;
   clearTimeout(_tooltipHideTimer);
+  _tooltipNodeId = nodeBtn.dataset.id ?? null;
+  els.mindMapMemoTooltip.dataset.nodeId = _tooltipNodeId || "";
   els.mindMapMemoTooltip.textContent = memo;
+  els.mindMapMemoTooltip.title = "クリックするとノード設定の大画面メモを開きます";
+  els.mindMapMemoTooltip.setAttribute("role", "button");
+  els.mindMapMemoTooltip.setAttribute("tabindex", "0");
+  els.mindMapMemoTooltip.setAttribute("aria-label", "ノード設定の大画面メモを開く");
   els.mindMapMemoTooltip.hidden = false;
   positionMindMapMemoTooltip(nodeBtn);
 }
@@ -6594,10 +6756,16 @@ function hideMindMapMemoTooltip(immediate = false) {
   clearTimeout(_tooltipHideTimer);
   if (immediate) {
     els.mindMapMemoTooltip.hidden = true;
+    els.mindMapMemoTooltip.removeAttribute("data-node-id");
+    _tooltipNodeId = null;
     return;
   }
   _tooltipHideTimer = setTimeout(() => {
-    if (els.mindMapMemoTooltip) els.mindMapMemoTooltip.hidden = true;
+    if (els.mindMapMemoTooltip) {
+      els.mindMapMemoTooltip.hidden = true;
+      els.mindMapMemoTooltip.removeAttribute("data-node-id");
+    }
+    _tooltipNodeId = null;
   }, 80);
 }
 
@@ -6620,6 +6788,18 @@ function positionMindMapMemoTooltip(nodeBtn) {
   if (top < gap) top = r.bottom + gap;
   tt.style.left = left + "px";
   tt.style.top = top + "px";
+}
+
+function openMindMapNodeMemoFullscreen(nodeId) {
+  if (isMindMapPresentationMode()) return;
+  const node = getMindMapNode(nodeId);
+  if (!node) return;
+
+  hideMindMapMemoTooltip(true);
+  state.mindMapSelectedId = node.id;
+  renderMindMap();
+  openMindMapNodeSettingsPanel();
+  setMindMapMemoFullscreen(true);
 }
 
 els.mindMapBtn.addEventListener("click", openMindMapPanel);
@@ -6703,11 +6883,27 @@ els.mindMapNodes?.addEventListener("mouseout", e => {
     hideMindMapMemoTooltip();
   }
 });
+els.mindMapMemoTooltip?.addEventListener("pointerdown", e => {
+  e.stopPropagation();
+});
+els.mindMapMemoTooltip?.addEventListener("click", e => {
+  e.preventDefault();
+  e.stopPropagation();
+  openMindMapNodeMemoFullscreen(els.mindMapMemoTooltip.dataset.nodeId || _tooltipNodeId);
+});
+els.mindMapMemoTooltip?.addEventListener("keydown", e => {
+  if (e.key !== "Enter" && e.key !== " ") return;
+  e.preventDefault();
+  e.stopPropagation();
+  openMindMapNodeMemoFullscreen(els.mindMapMemoTooltip.dataset.nodeId || _tooltipNodeId);
+});
+els.mindMapMemoTooltip?.addEventListener("mouseenter", () => clearTimeout(_tooltipHideTimer));
+els.mindMapMemoTooltip?.addEventListener("mouseleave", () => hideMindMapMemoTooltip());
 renderMindMapColorPalettes();
 renderMindMapContextColorPalettes();
 getMindMapColorControls().forEach(bindMindMapColorControl);
 els.mindMapAddChildBtn?.addEventListener("click", () => addMindMapNode(state.mindMapSelectedId));
-els.mindMapAlignChildrenBtn?.addEventListener("click", alignMindMapSiblingNodes);
+els.mindMapAlignChildrenBtn?.addEventListener("click", alignMindMapChildNodes);
 els.mindMapDeleteNodeBtn?.addEventListener("click", deleteSelectedMindMapNode);
 els.mindMapNodeSettingsBtn?.addEventListener("click", e => {
   e.stopPropagation();
@@ -6773,7 +6969,7 @@ els.mindMapContextMenu.addEventListener("click", async e => {
       collapseMindMapSubtree(nodeId);
       break;
     case "align":
-      alignMindMapSiblingNodes();
+      alignMindMapChildNodes();
       break;
     case "undo":
       await undoMindMapLastChange();
