@@ -967,6 +967,26 @@ function createSyncPairBadge(mapId, title = "") {
   return badge;
 }
 
+function getSyncSourceNoteIdForMap(mapId) {
+  if (!mapId) return null;
+  if (state.mindMap?.id === mapId && state.mindMap.sync_enabled) {
+    return state.mindMap.source_note_id || null;
+  }
+  const entry = state.mindMapList?.find(map => map.id === mapId);
+  return entry?.sync_enabled ? (entry.source_note_id || null) : null;
+}
+
+function isNoteSyncDisplayRoot(note) {
+  if (!note?.linked_mindmap_id) return false;
+  const sourceNoteId = getSyncSourceNoteIdForMap(note.linked_mindmap_id);
+  if (sourceNoteId) return note.id === sourceNoteId;
+  return note.parent_id === null;
+}
+
+function getNoteSyncDisplayMapId(note) {
+  return isNoteSyncDisplayRoot(note) ? note.linked_mindmap_id : null;
+}
+
 function isImeComposing(e, localFlag = false) {
   return Boolean(localFlag || e?.isComposing || e?.keyCode === 229);
 }
@@ -2943,10 +2963,11 @@ function renderNoteList() {
   }
 
   roots.forEach(note => {
+    const syncDisplayMapId = getNoteSyncDisplayMapId(note);
     const item = document.createElement("li");
     item.className = `mindmap-list-item${note.id === activeRootId ? " is-active" : ""}`;
     item.dataset.id = note.id;
-    if (note.linked_mindmap_id) applySyncPairStyle(item, note.linked_mindmap_id);
+    if (syncDisplayMapId) applySyncPairStyle(item, syncDisplayMapId);
 
     const openBtn = document.createElement("button");
     openBtn.type = "button";
@@ -2960,10 +2981,10 @@ function renderNoteList() {
     title.className = "mindmap-list-title";
     title.textContent = note.title || "無題";
     titleLine.appendChild(title);
-    if (note.linked_mindmap_id) {
-      const mapTitle = state.mindMapList.find(map => map.id === note.linked_mindmap_id)?.title;
+    if (syncDisplayMapId) {
+      const mapTitle = state.mindMapList.find(map => map.id === syncDisplayMapId)?.title;
       titleLine.appendChild(createSyncPairBadge(
-        note.linked_mindmap_id,
+        syncDisplayMapId,
         mapTitle ? `マインドマップ「${mapTitle}」と同期中` : "マインドマップと同期中",
       ));
     }
@@ -3104,6 +3125,7 @@ function renderNode(note, treeCtx) {
   const lockedClosed = Boolean(note.locked) && !state.unlockedNoteIds.has(note.id);
   const expanded  = !lockedClosed && (state.expanded.has(note.id) || treeCtx.hasQuery);
   const descCount = treeCtx.descendantCount(note.id);
+  const syncDisplayMapId = getNoteSyncDisplayMapId(note);
 
   const wrapper = document.createElement("div");
   wrapper.className = "tree-node";
@@ -3112,7 +3134,7 @@ function renderNode(note, treeCtx) {
   row.className  = `tree-row${note.id === state.selectedId ? " active" : ""}${note.pinned ? " pinned" : ""}${note.checked ? " checked" : ""}${note.locked ? " locked" : ""}${lockedClosed ? " locked-closed" : ""}`;
   row.draggable  = !lockedClosed;
   row.dataset.id = note.id;
-  if (note.linked_mindmap_id) applySyncPairStyle(row, note.linked_mindmap_id);
+  if (syncDisplayMapId) applySyncPairStyle(row, syncDisplayMapId);
 
   const toggle = document.createElement("span");
   toggle.className   = "toggle";
@@ -3148,10 +3170,10 @@ function renderNode(note, treeCtx) {
   const title = document.createElement("span");
   title.className   = "tree-title";
   title.textContent = note.title || "無題";
-  if (note.linked_mindmap_id) {
-    const mapTitle = state.mindMapList.find(map => map.id === note.linked_mindmap_id)?.title;
+  if (syncDisplayMapId) {
+    const mapTitle = state.mindMapList.find(map => map.id === syncDisplayMapId)?.title;
     titleWrap.appendChild(createSyncPairBadge(
-      note.linked_mindmap_id,
+      syncDisplayMapId,
       mapTitle ? `マインドマップ「${mapTitle}」と同期中` : "マインドマップと同期中",
     ));
   }
@@ -3332,10 +3354,11 @@ function renderEditor() {
   ensureMediaTextLines();
   els.breadcrumb.textContent = getParentChain(note).join(" / ");
   const src = note.source_file ? ` / 読み込み元: ${note.source_file}` : "";
-  const syncStyle = note.linked_mindmap_id ? getSyncPairStyle(note.linked_mindmap_id) : null;
+  const syncDisplayMapId = getNoteSyncDisplayMapId(note);
+  const syncStyle = syncDisplayMapId ? getSyncPairStyle(syncDisplayMapId) : null;
   const sync = syncStyle ? ` / ${syncStyle.label}でマインドマップと同期中` : "";
   els.selectedInfo.textContent = `作成: ${note.created_at} / 更新: ${note.updated_at}${src}${sync}`;
-  applySyncPairStyle(els.selectedInfo, note.linked_mindmap_id, Boolean(note.linked_mindmap_id));
+  applySyncPairStyle(els.selectedInfo, syncDisplayMapId, Boolean(syncDisplayMapId));
   els.saveStatus.textContent   = "保存済み";
   updateEmptyState();
   updateUndoButton();
@@ -4426,6 +4449,7 @@ const MINDMAP_NODE_HALF_W  = 86;
 const MINDMAP_ADD_CHILD_OFFSET = 0;
 const MINDMAP_ALIGN_SUBTREE_GAP = 32;
 const MINDMAP_ADD_COLLISION_MARGIN = 14;
+const MINDMAP_ALIGN_NODE_SAFETY_Y = 10;
 const MINDMAP_DEFAULT_NODE_FILL = "#ffffff";
 const MINDMAP_DEFAULT_NODE_BORDER = "#3b82f6";
 const MINDMAP_ROOT_NODE_FILL = "#2563eb";
@@ -5360,8 +5384,10 @@ function renderMindMap() {
       addBtn.style.top = `${pos.y}px`;
       addBtn.addEventListener("pointerdown", e => {
         if (e.button !== 0) return;
+        e.preventDefault();
         e.stopPropagation();
-        addBtn.setPointerCapture(e.pointerId);
+        setPointerCaptureSafe(addBtn, e.pointerId);
+        state.mindMapNodeDrag = null;
         state.mindMapLinkDrag = { nodeId: node.id, pointerId: e.pointerId, startX: e.clientX, startY: e.clientY, moved: false };
       });
       addBtn.addEventListener("pointermove", e => {
@@ -5379,6 +5405,7 @@ function renderMindMap() {
         if (!drag || drag.nodeId !== node.id || drag.pointerId !== e.pointerId) return;
         const wasMoved = drag.moved;
         state.mindMapLinkDrag = null;
+        releasePointerCaptureSafe(addBtn, e.pointerId);
         hideMindMapRubberBand();
         clearMindMapLinkTargetHighlight();
         if (!wasMoved) {
@@ -5390,6 +5417,14 @@ function renderMindMap() {
         }
       });
       addBtn.addEventListener("pointercancel", e => {
+        const drag = state.mindMapLinkDrag;
+        if (!drag || drag.nodeId !== node.id || drag.pointerId !== e.pointerId) return;
+        state.mindMapLinkDrag = null;
+        releasePointerCaptureSafe(addBtn, e.pointerId);
+        hideMindMapRubberBand();
+        clearMindMapLinkTargetHighlight();
+      });
+      addBtn.addEventListener("lostpointercapture", e => {
         const drag = state.mindMapLinkDrag;
         if (!drag || drag.nodeId !== node.id || drag.pointerId !== e.pointerId) return;
         state.mindMapLinkDrag = null;
@@ -5424,9 +5459,11 @@ function renderMindMap() {
     });
     nodeBtn.addEventListener("pointerdown", e => {
       if (presentationMode || e.button !== 0) return;
+      e.preventDefault();
       e.stopPropagation();
-      nodeBtn.setPointerCapture(e.pointerId);
+      setPointerCaptureSafe(nodeBtn, e.pointerId);
       const start = layout.get(node.id) ?? { x: 0, y: 0 };
+      state.mindMapLinkDrag = null;
       state.mindMapNodeDrag = {
         id: node.id,
         pointerId: e.pointerId,
@@ -5465,21 +5502,30 @@ function renderMindMap() {
     nodeBtn.addEventListener("pointerup", e => {
       const drag = state.mindMapNodeDrag;
       if (!drag || drag.id !== node.id || drag.pointerId !== e.pointerId) return;
-      nodeBtn.releasePointerCapture(e.pointerId);
       state.mindMapNodeDrag = null;
       nodeBtn.classList.remove("is-dragging");
+      releasePointerCaptureSafe(nodeBtn, e.pointerId);
       if (drag.moved) {
         const finalPos = layout.get(node.id);
-        pushMindMapUndoSnapshot();
-        node.x = finalPos.x;
-        node.y = finalPos.y;
-        scheduleMindMapSave();
+        if (finalPos) {
+          pushMindMapUndoSnapshot();
+          node.x = finalPos.x;
+          node.y = finalPos.y;
+          scheduleMindMapSave();
+        }
       }
     });
     nodeBtn.addEventListener("pointercancel", e => {
       const drag = state.mindMapNodeDrag;
-      if (!drag || drag.id !== node.id) return;
-      nodeBtn.releasePointerCapture(e.pointerId);
+      if (!drag || drag.id !== node.id || drag.pointerId !== e.pointerId) return;
+      state.mindMapNodeDrag = null;
+      nodeBtn.classList.remove("is-dragging");
+      releasePointerCaptureSafe(nodeBtn, e.pointerId);
+      if (drag.moved) renderMindMap();
+    });
+    nodeBtn.addEventListener("lostpointercapture", e => {
+      const drag = state.mindMapNodeDrag;
+      if (!drag || drag.id !== node.id || drag.pointerId !== e.pointerId) return;
       state.mindMapNodeDrag = null;
       nodeBtn.classList.remove("is-dragging");
       if (drag.moved) renderMindMap();
@@ -5721,6 +5767,24 @@ function clearMindMapLinkTargetHighlight() {
   });
 }
 
+function setPointerCaptureSafe(element, pointerId) {
+  try {
+    element?.setPointerCapture?.(pointerId);
+  } catch (_) {
+    // Dragging can still continue while the pointer stays over the element.
+  }
+}
+
+function releasePointerCaptureSafe(element, pointerId) {
+  try {
+    if (element?.hasPointerCapture?.(pointerId)) {
+      element.releasePointerCapture(pointerId);
+    }
+  } catch (_) {
+    // Pointer capture may already be gone if the browser canceled the pointer.
+  }
+}
+
 function getMindMapSubtreeBranches(nodeId) {
   const subtreeIds = collectMindMapSubtreeIds(nodeId);
   return getMindMapNodes().filter(node => (
@@ -5738,7 +5802,11 @@ function toggleMindMapChildren(nodeId) {
   }
 
   pushMindMapUndoSnapshot();
+  const willExpand = node.collapsed;
   node.collapsed = !node.collapsed;
+  if (willExpand && !alignMindMapVisibleChildrenOfParent(node, { avoidExternalOverlaps: true })) {
+    avoidMindMapExpandedChildrenOverlaps(node.id);
+  }
   state.mindMapSelectedId = node.id;
   renderMindMap();
   scheduleMindMapSave();
@@ -5773,9 +5841,9 @@ function estimateMindMapNodeHeight(node) {
   const weightedLength = Array.from(text).reduce((sum, ch) => (
     sum + (/[\x00-\x7F]/.test(ch) ? 0.55 : 1)
   ), 0);
-  const lines = Math.max(1, Math.ceil(weightedLength / 10));
+  const lines = Math.max(1, Math.ceil(weightedLength / 8.5));
   const minHeight = node?.parent_id === null ? 66 : 54;
-  return Math.max(minHeight, 20 + lines * 19);
+  return Math.max(minHeight, 24 + lines * 21) + MINDMAP_ALIGN_NODE_SAFETY_Y;
 }
 
 function getMindMapNodePosition(node, layout) {
@@ -5794,18 +5862,18 @@ function getMindMapSubtreeBounds(nodeId, layout) {
   for (const id of ids) {
     const node = getMindMapNode(id);
     const pos = getMindMapNodePosition(node, layout);
-    if (!node || !pos) continue;
-    const halfH = estimateMindMapNodeHeight(node) / 2;
-    minY = Math.min(minY, pos.y - halfH);
-    maxY = Math.max(maxY, pos.y + halfH);
+    if (!node || !pos || !isMindMapNodeVisible(node)) continue;
+    const rect = getMindMapNodeCollisionRect(node, pos);
+    minY = Math.min(minY, rect.top);
+    maxY = Math.max(maxY, rect.bottom);
   }
 
   const target = getMindMapNode(nodeId);
   const targetPos = getMindMapNodePosition(target, layout) ?? { x: MINDMAP_CENTER_X, y: MINDMAP_CENTER_Y };
   if (!Number.isFinite(minY) || !Number.isFinite(maxY)) {
-    const halfH = estimateMindMapNodeHeight(target) / 2;
-    minY = targetPos.y - halfH;
-    maxY = targetPos.y + halfH;
+    const rect = getMindMapNodeCollisionRect(target, targetPos);
+    minY = rect.top;
+    maxY = rect.bottom;
   }
 
   return {
@@ -5840,6 +5908,141 @@ function createMindMapChildAlignPlans(children, parentPos, layout) {
   });
 }
 
+function getMindMapAlignPlanCollisionRects(plan, layout) {
+  const rects = [];
+  for (const id of plan.ids) {
+    const node = getMindMapNode(id);
+    const pos = getMindMapNodePosition(node, layout);
+    if (!node || !pos || !isMindMapNodeVisible(node)) continue;
+    rects.push(getMindMapNodeCollisionRect(node, {
+      x: pos.x + plan.dx,
+      y: pos.y + plan.dy,
+    }));
+  }
+  return rects;
+}
+
+function shiftMindMapAlignPlan(plan, dy) {
+  plan.targetY += dy;
+  plan.dy += dy;
+}
+
+function resolveMindMapChildAlignPlanOverlaps(plans, layout, initialRects = []) {
+  const placedRects = [...initialRects];
+
+  for (const plan of plans) {
+    let rects = getMindMapAlignPlanCollisionRects(plan, layout);
+
+    for (let i = 0; i < 80; i += 1) {
+      let shiftY = 0;
+      for (const rect of rects) {
+        for (const placed of placedRects) {
+          if (mindMapRectsOverlap(rect, placed)) {
+            shiftY = Math.max(shiftY, placed.bottom - rect.top + 1);
+          }
+        }
+      }
+      if (shiftY <= 0) break;
+      shiftMindMapAlignPlan(plan, shiftY);
+      rects = getMindMapAlignPlanCollisionRects(plan, layout);
+    }
+
+    placedRects.push(...rects);
+  }
+
+  return plans;
+}
+
+function createMindMapCurrentSubtreeShiftPlans(nodes, layout) {
+  return nodes.map((node, index) => {
+    const pos = getMindMapNodePosition(node, layout) ?? { x: MINDMAP_CENTER_X, y: MINDMAP_CENTER_Y };
+    return {
+      node,
+      index,
+      ids: collectMindMapSubtreeIds(node.id),
+      targetX: pos.x,
+      targetY: pos.y,
+      targetPos: pos,
+      dx: 0,
+      dy: 0,
+    };
+  });
+}
+
+function getMindMapAlignPlanMovingIds(plans) {
+  const ids = new Set();
+  plans.forEach(plan => {
+    plan.ids.forEach(id => {
+      const node = getMindMapNode(id);
+      if (node && isMindMapNodeVisible(node)) ids.add(id);
+    });
+  });
+  return ids;
+}
+
+function applyMindMapSubtreeShiftPlans(plans, layout, options = {}) {
+  const updateOrder = Boolean(options.updateOrder);
+  let changed = false;
+  for (const plan of plans) {
+    if (Math.abs(plan.dx) >= 0.5 || Math.abs(plan.dy) >= 0.5) {
+      changed = true;
+      for (const id of plan.ids) {
+        const node = getMindMapNode(id);
+        const pos = getMindMapNodePosition(node, layout);
+        if (!node || !pos) continue;
+        node.x = pos.x + plan.dx;
+        node.y = pos.y + plan.dy;
+      }
+    }
+
+    if (updateOrder) {
+      const nextOrder = (plan.index + 1) * 1000;
+      if (plan.node.order !== nextOrder) changed = true;
+      if (Number.isFinite(plan.targetX) && Number.isFinite(plan.targetY)) {
+        if (plan.node.x !== plan.targetX || plan.node.y !== plan.targetY) changed = true;
+        plan.node.x = plan.targetX;
+        plan.node.y = plan.targetY;
+      }
+      plan.node.order = nextOrder;
+    }
+  }
+  return changed;
+}
+
+function avoidMindMapExpandedChildrenOverlaps(nodeId) {
+  const children = getMindMapChildren(nodeId).filter(isMindMapNodeVisible);
+  if (children.length === 0) return false;
+
+  const layout = calculateMindMapLayout();
+  const plans = createMindMapCurrentSubtreeShiftPlans(children, layout);
+  const movingIds = getMindMapAlignPlanMovingIds(plans);
+  const externalRects = getVisibleMindMapCollisionRects(layout, movingIds);
+
+  resolveMindMapChildAlignPlanOverlaps(plans, layout, externalRects);
+  return applyMindMapSubtreeShiftPlans(plans, layout);
+}
+
+function alignMindMapVisibleChildrenOfParent(parent, options = {}) {
+  if (!parent) return false;
+  const children = getMindMapChildren(parent.id).filter(isMindMapNodeVisible);
+  if (children.length < 2) return false;
+
+  const layout = calculateMindMapLayout();
+  const parentPos = layout.get(parent.id) ?? {
+    x: Number.isFinite(parent.x) ? parent.x : MINDMAP_CENTER_X,
+    y: Number.isFinite(parent.y) ? parent.y : MINDMAP_CENTER_Y,
+  };
+  const plans = createMindMapChildAlignPlans(children, parentPos, layout);
+  const movingIds = getMindMapAlignPlanMovingIds(plans);
+  const externalRects = options.avoidExternalOverlaps
+    ? getVisibleMindMapCollisionRects(layout, movingIds)
+    : [];
+
+  resolveMindMapChildAlignPlanOverlaps(plans, layout, externalRects);
+  applyMindMapSubtreeShiftPlans(plans, layout, { updateOrder: true });
+  return true;
+}
+
 function alignMindMapChildNodes() {
   if (isMindMapPresentationMode()) return;
   const selected = getMindMapNode(state.mindMapSelectedId);
@@ -5850,27 +6053,7 @@ function alignMindMapChildNodes() {
   }
 
   pushMindMapUndoSnapshot();
-  const layout = calculateMindMapLayout();
-  const parentPos = layout.get(parent.id) ?? {
-    x: Number.isFinite(parent.x) ? parent.x : MINDMAP_CENTER_X,
-    y: Number.isFinite(parent.y) ? parent.y : MINDMAP_CENTER_Y,
-  };
-  const plans = createMindMapChildAlignPlans(nodes, parentPos, layout);
-
-  plans.forEach(plan => {
-    for (const id of plan.ids) {
-      const node = getMindMapNode(id);
-      const pos = getMindMapNodePosition(node, layout);
-      if (!node || !pos) continue;
-      node.x = pos.x + plan.dx;
-      node.y = pos.y + plan.dy;
-    }
-
-    plan.node.order = (plan.index + 1) * 1000;
-    plan.node.x = plan.targetX;
-    plan.node.y = plan.targetY;
-  });
-
+  alignMindMapVisibleChildrenOfParent(parent);
   renderMindMap();
   scheduleMindMapSave();
   showToast("子ノードを整列しました。");
@@ -7822,7 +8005,18 @@ const _crop = {
   scale:     1,
   rect:      { x: 0, y: 0, w: 100, h: 100 },
   drag:      null,   // { type, startX, startY, initRect }
+  ready:     false,
+  confirming: false,
+  sessionId: 0,
 };
+
+function updateCropConfirmState() {
+  if (!els.cropOk) return;
+  els.cropOk.disabled = !_crop.ready || _crop.confirming;
+  els.cropOk.textContent = _crop.confirming
+    ? "処理中..."
+    : (_crop.ready ? "確定" : "読み込み中...");
+}
 
 function _cropClientToCanvas(e) {
   const c = els.cropCanvas;
@@ -7916,6 +8110,10 @@ function openCropModal(figure) {
   _crop.figure    = figure;
   _crop.imgEl     = imgEl;
   _crop.canvasImg = null;
+  _crop.ready     = false;
+  _crop.confirming = false;
+  const sessionId = ++_crop.sessionId;
+  updateCropConfirmState();
 
   // ① モーダルを先に開く（hidden な要素内のキャンバスへの描画は
   //    ブラウザによって無視されることがあるため、先に表示してから描画する）
@@ -7926,7 +8124,8 @@ function openCropModal(figure) {
   // ② cache:'no-store' で 304 を完全に回避し、常にフルボディを取得する。
   //    fetch が 304 を返すとボディが空になり blob が空 → canvas が黒くなる。
   //    Blob → ObjectURL → Image.onload 経路は CORS タント・デコード未完了も回避できる。
-  fetch(imgEl.src, { cache: 'no-store' })
+  const fetchOptions = /^https?:/i.test(imgEl.src) ? { cache: "no-store" } : {};
+  fetch(imgEl.src, fetchOptions)
     .then(r => r.blob())
     .then(blob => {
       if (blob.size === 0) throw new Error("画像データが空です");
@@ -7939,6 +8138,7 @@ function openCropModal(figure) {
       });
     })
     .then(img => {
+      if (sessionId !== _crop.sessionId || els.cropOverlay.hidden) return;
       _crop.canvasImg = img;
 
       const nw = img.naturalWidth;
@@ -7956,9 +8156,12 @@ function openCropModal(figure) {
 
       _crop.rect = { x: 0, y: 0, w: cw, h: ch };
       _crop.drag = null;
+      _crop.ready = true;
+      updateCropConfirmState();
       drawCropCanvas();
     })
     .catch(err => {
+      if (sessionId !== _crop.sessionId) return;
       closeCropModal();
       showToast("画像の読み込みに失敗しました: " + err.message);
     });
@@ -7968,8 +8171,13 @@ function closeCropModal() {
   els.cropOverlay.hidden = true;
   if (_crop.canvasImg instanceof ImageBitmap) _crop.canvasImg.close();
   _crop.figure    = null;
+  _crop.imgEl     = null;
   _crop.canvasImg = null;
   _crop.drag      = null;
+  _crop.ready     = false;
+  _crop.confirming = false;
+  _crop.sessionId += 1;
+  updateCropConfirmState();
 }
 
 // ポインターイベント（マウス + タッチ共通）
@@ -8024,19 +8232,26 @@ els.cropCanvas.addEventListener("pointerup",     () => { _crop.drag = null; });
 els.cropCanvas.addEventListener("pointercancel", () => { _crop.drag = null; });
 
 async function confirmCrop() {
-  if (!STORAGE_ENABLED) {
-    closeCropModal();
-    showToast("トリミングに必要なStorage設定が見つかりません。");
+  if (_crop.confirming) return;
+  if (!_crop.ready || !_crop.canvasImg) {
+    showToast("画像の読み込みが終わってから確定してください。");
     return;
   }
   const { figure, imgEl, scale, rect } = _crop;
   if (!figure || !imgEl) return;
+  _crop.confirming = true;
+  updateCropConfirmState();
 
   const nx = Math.round(rect.x / scale);
   const ny = Math.round(rect.y / scale);
   const nw = Math.round(rect.w / scale);
   const nh = Math.round(rect.h / scale);
-  if (nw < 2 || nh < 2) { showToast("範囲が小さすぎます。"); return; }
+  if (nw < 2 || nh < 2) {
+    _crop.confirming = false;
+    updateCropConfirmState();
+    showToast("範囲が小さすぎます。");
+    return;
+  }
   pushUndoSnapshot(snapshotFromNote(getSelectedNote()));
 
   const tmpCanvas = document.createElement("canvas");
@@ -8046,38 +8261,21 @@ async function confirmCrop() {
   const drawSrc = _crop.canvasImg || imgEl;
   tmpCanvas.getContext("2d").drawImage(drawSrc, nx, ny, nw, nh, 0, 0, nw, nh);
 
-  closeCropModal();
-
   try {
-    const blob = await new Promise((res, rej) =>
-      tmpCanvas.toBlob(b => b ? res(b) : rej(new Error("変換失敗")), "image/png")
-    );
-    const note        = getSelectedNote();
-    const mediaId     = makeId();
-    const storagePath = `users/${state.uid}/media/${mediaId}.png`;
-    const fileRef     = storage.ref(storagePath);
-    await fileRef.put(blob, { contentType: "image/png" });
-    const downloadURL = await fileRef.getDownloadURL();
-    const item = {
-      id:            mediaId,
-      filename:      storagePath,
-      original_name: "cropped.png",
-      mime_type:     "image/png",
-      created_at:    nowIso(),
-      storagePath,
-      downloadURL,
-    };
-    note.media = [...(note.media ?? []), item];
+    const blob = await canvasToBlob(tmpCanvas, "image/png");
+    const croppedUrl = await blobToDataUrl(blob);
 
-    // DOM の img src を新しいファイルに差し替え
     imgEl.addEventListener("load", () => scheduleMediaCaretSync(), { once: true });
-    imgEl.src = downloadURL;
-    imgEl.alt = item.original_name;
+    imgEl.src = croppedUrl;
+    imgEl.alt = "cropped.png";
     scheduleMediaCaretSync();
 
     scheduleSave();
+    closeCropModal();
     showToast("トリミングしました。");
   } catch (err) {
+    _crop.confirming = false;
+    updateCropConfirmState();
     showToast("トリミングに失敗しました: " + err.message);
   }
 }
@@ -8456,6 +8654,11 @@ document.addEventListener("click", e => {
 });
 
 document.addEventListener("keydown", e => {
+  if (!els.cropOverlay.hidden && (e.key === "Enter" || e.key === "NumpadEnter")) {
+    e.preventDefault();
+    confirmCrop();
+    return;
+  }
   if (e.key === "Escape" && !els.noteLockOverlay.hidden) {
     e.preventDefault();
     closeNoteLockPrompt(false);
