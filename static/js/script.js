@@ -1,6 +1,12 @@
 // ── State ─────────────────────────────────────────────────────────────────────
 
 const MEMO_DEFAULT_TEXT_COLOR = "#111827";
+const MEMO_URL_RE = /(?:https?:\/\/|www\.)[^\s<>"']+/gi;
+const MEMO_URL_TRAILING_CHARS = ".,!?;:、。！？；：";
+const MEMO_URL_TRAILING_PAIRS = {
+  ")": "(", "]": "[", "}": "{",
+  "）": "（", "］": "［", "｝": "｛",
+};
 
 const state = {
   uid:             null,
@@ -54,6 +60,7 @@ const NO_SELECTION_MESSAGE = "メモを選択するか作成してください";
 
 let _isComposing = false;
 let _isMindMapNodeTitleComposing = false;
+let _lastMemoLinkOpen = { href: "", at: 0 };
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
 
@@ -2190,14 +2197,202 @@ els.tree.addEventListener("dragleave", e => {
 
 // ── コンテンツ変換 ─────────────────────────────────────────────────────────────
 
+function appendPlainTextWithBreaks(parent, text) {
+  const lines = String(text ?? "").split(/\r\n?|\n/);
+  lines.forEach((line, index) => {
+    if (index > 0) parent.appendChild(document.createElement("br"));
+    if (line) parent.appendChild(document.createTextNode(line));
+  });
+}
+
+function countMemoChar(text, char) {
+  let count = 0;
+  for (const current of text) {
+    if (current === char) count += 1;
+  }
+  return count;
+}
+
+function splitMemoUrlTrailingText(rawUrl) {
+  let url = String(rawUrl ?? "");
+  let trailing = "";
+
+  while (url) {
+    const last = url.charAt(url.length - 1);
+    const openPair = MEMO_URL_TRAILING_PAIRS[last];
+    const shouldTrim = MEMO_URL_TRAILING_CHARS.includes(last) ||
+      (openPair && countMemoChar(url, last) > countMemoChar(url, openPair));
+    if (!shouldTrim) break;
+    trailing = last + trailing;
+    url = url.slice(0, -1);
+  }
+
+  return { url, trailing };
+}
+
+function normalizeMemoLinkHref(url) {
+  const raw = String(url ?? "").trim();
+  if (!raw) return null;
+  const href = /^www\./i.test(raw) ? `https://${raw}` : raw;
+  try {
+    const parsed = new URL(href, document.baseURI);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+    return parsed.href;
+  } catch (_) {
+    return null;
+  }
+}
+
+function isMacLikePlatform() {
+  const platform = navigator.userAgentData?.platform || navigator.platform || "";
+  if (/mac|iphone|ipad|ipod/i.test(platform)) return true;
+  return /mac/i.test(navigator.userAgent || "") && navigator.maxTouchPoints > 1;
+}
+
+function shouldOpenMemoLinkFromClick(event) {
+  return isMacLikePlatform() ? event.metaKey : event.ctrlKey;
+}
+
+function recentlyOpenedMemoLink(href) {
+  return _lastMemoLinkOpen.href === href && Date.now() - _lastMemoLinkOpen.at < 800;
+}
+
+function openMemoLink(href) {
+  _lastMemoLinkOpen = { href, at: Date.now() };
+  let opened = null;
+  try {
+    opened = window.open("about:blank", "_blank");
+    if (opened) {
+      opened.opener = null;
+      opened.location.href = href;
+      return;
+    }
+  } catch (_) {
+    // Fall back to same-tab navigation below.
+  }
+  window.location.href = href;
+}
+
+function memoLinkModifierActiveFromKeyEvent(event) {
+  const isMac = isMacLikePlatform();
+  const modifierKey = isMac ? "Meta" : "Control";
+  if (event.type === "keyup" && event.key === modifierKey) return false;
+  return isMac ? Boolean(event.metaKey || event.key === modifierKey)
+               : Boolean(event.ctrlKey || event.key === modifierKey);
+}
+
+function setMemoLinkCursorMode(active) {
+  els.contentInput?.classList.toggle("is-memo-link-open-mode", Boolean(active));
+}
+
+function getMemoLinkFromTarget(target) {
+  const element = target?.nodeType === Node.ELEMENT_NODE ? target : target?.parentElement;
+  return element?.closest?.("a[href]") || null;
+}
+
+function memoLinkOpenHintText() {
+  return isMacLikePlatform() ? "⌘ + クリックで開く" : "Ctrl + クリックで開く";
+}
+
+function setMemoLinkOpenHint(link) {
+  const hint = memoLinkOpenHintText();
+  link.dataset.openHint = hint;
+  link.title = hint;
+}
+
+function createMemoLinkElement(label, href) {
+  const link = document.createElement("a");
+  link.className = "memo-link";
+  link.href = href;
+  link.target = "_blank";
+  link.rel = "noopener noreferrer";
+  setMemoLinkOpenHint(link);
+  link.textContent = label;
+  return link;
+}
+
+function appendLinkedTextFragment(parent, text) {
+  const source = String(text ?? "");
+  let lastIndex = 0;
+  let match;
+  MEMO_URL_RE.lastIndex = 0;
+
+  while ((match = MEMO_URL_RE.exec(source)) !== null) {
+    appendPlainTextWithBreaks(parent, source.slice(lastIndex, match.index));
+
+    const { url, trailing } = splitMemoUrlTrailingText(match[0]);
+    const href = normalizeMemoLinkHref(url);
+    if (href) parent.appendChild(createMemoLinkElement(url, href));
+    else appendPlainTextWithBreaks(parent, url);
+    appendPlainTextWithBreaks(parent, trailing);
+
+    lastIndex = match.index + match[0].length;
+  }
+
+  appendPlainTextWithBreaks(parent, source.slice(lastIndex));
+}
+
+function linkifyPlainTextToHtml(text) {
+  const holder = document.createElement("div");
+  appendLinkedTextFragment(holder, text);
+  return holder.innerHTML;
+}
+
+function memoTextHasUrl(text) {
+  MEMO_URL_RE.lastIndex = 0;
+  return MEMO_URL_RE.test(String(text ?? ""));
+}
+
+function prepareExistingMemoLinks(root) {
+  root.querySelectorAll("a[href]").forEach(link => {
+    const href = normalizeMemoLinkHref(link.getAttribute("href") || link.href);
+    if (!href) {
+      link.replaceWith(...link.childNodes);
+      return;
+    }
+    link.classList.add("memo-link");
+    link.href = href;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    setMemoLinkOpenHint(link);
+  });
+}
+
+function shouldSkipMemoUrlLinkify(textNode) {
+  const parent = textNode.parentElement;
+  return !parent || Boolean(parent.closest("a, script, style, textarea"));
+}
+
+function linkifyMemoHtml(html) {
+  const holder = document.createElement("div");
+  holder.innerHTML = html || "";
+  prepareExistingMemoLinks(holder);
+
+  const walker = document.createTreeWalker(holder, NodeFilter.SHOW_TEXT);
+  const textNodes = [];
+  while (walker.nextNode()) {
+    const node = walker.currentNode;
+    if (!shouldSkipMemoUrlLinkify(node) && memoTextHasUrl(node.nodeValue)) {
+      textNodes.push(node);
+    }
+  }
+
+  textNodes.forEach(node => {
+    const fragment = document.createDocumentFragment();
+    appendLinkedTextFragment(fragment, node.nodeValue);
+    node.replaceWith(fragment);
+  });
+
+  return holder.innerHTML;
+}
+
 function contentToHtml(content) {
   if (!content) return "";
-  if (/<(img|video|figure|div|p|br|span)\b/i.test(content)) return content;
-  return content
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/\n/g, "<br>");
+  const raw = String(content);
+  if (/<(img|video|figure|div|p|br|span|a)\b/i.test(raw)) {
+    return linkifyMemoHtml(raw);
+  }
+  return linkifyPlainTextToHtml(raw);
 }
 
 function contentToPlainText(content) {
@@ -2222,6 +2417,39 @@ function contentToPlainText(content) {
 }
 
 function getContentHtml() { return els.contentInput.innerHTML ?? ""; }
+
+function insertFragmentAtMemoSelection(fragment) {
+  redirectMediaCaretTyping();
+
+  const selection = window.getSelection();
+  const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+  const lastNode = fragment.lastChild;
+
+  if (!range || !rangeIsInMemoEditor(range)) {
+    els.contentInput.appendChild(fragment);
+  } else {
+    range.deleteContents();
+    range.insertNode(fragment);
+  }
+
+  if (lastNode && selection) {
+    const nextRange = document.createRange();
+    nextRange.setStartAfter(lastNode);
+    nextRange.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(nextRange);
+  }
+}
+
+function insertLinkedTextAtMemoSelection(text) {
+  const fragment = document.createDocumentFragment();
+  appendLinkedTextFragment(fragment, text);
+  insertFragmentAtMemoSelection(fragment);
+  repairMediaCaretAfterEdit();
+  updateEmptyState();
+  updateMemoFormatUiFromSelection();
+  scheduleSave();
+}
 
 function cloneData(value) {
   return JSON.parse(JSON.stringify(value));
@@ -8399,7 +8627,28 @@ els.mediaContextMenu.addEventListener("click", e => {
 
 // ── contenteditable イベント委任 ──────────────────────────────────────────────
 
+els.contentInput.addEventListener("pointerdown", e => {
+  if (e.button !== 0) return;
+  const memoLink = getMemoLinkFromTarget(e.target);
+  if (!memoLink || !els.contentInput.contains(memoLink)) return;
+  const href = normalizeMemoLinkHref(memoLink.getAttribute("href") || memoLink.href);
+  if (!href || !shouldOpenMemoLinkFromClick(e)) return;
+  e.preventDefault();
+  e.stopPropagation();
+  openMemoLink(href);
+}, { capture: true });
+
 els.contentInput.addEventListener("click", e => {
+  const memoLink = getMemoLinkFromTarget(e.target);
+  if (memoLink && els.contentInput.contains(memoLink)) {
+    const href = normalizeMemoLinkHref(memoLink.getAttribute("href") || memoLink.href);
+    e.preventDefault();
+    if (href && shouldOpenMemoLinkFromClick(e) && !recentlyOpenedMemoLink(href)) {
+      openMemoLink(href);
+    }
+    return;
+  }
+
   const caretAnchor = e.target.closest(".media-caret-anchor");
   if (caretAnchor) {
     placeCaretInMediaCaretAnchor(caretAnchor);
@@ -8654,6 +8903,8 @@ document.addEventListener("click", e => {
 });
 
 document.addEventListener("keydown", e => {
+  setMemoLinkCursorMode(memoLinkModifierActiveFromKeyEvent(e));
+
   if (!els.cropOverlay.hidden && (e.key === "Enter" || e.key === "NumpadEnter")) {
     e.preventDefault();
     confirmCrop();
@@ -8728,6 +8979,18 @@ document.addEventListener("keydown", e => {
     clearTimeout(state.saveTimer);
     state.saveTimer = setTimeout(() => scheduleSave(), 0);
   }
+});
+
+document.addEventListener("keyup", e => {
+  setMemoLinkCursorMode(memoLinkModifierActiveFromKeyEvent(e));
+});
+
+window.addEventListener("blur", () => {
+  setMemoLinkCursorMode(false);
+});
+
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) setMemoLinkCursorMode(false);
 });
 
 document.addEventListener("dragend", () => {
@@ -8932,7 +9195,10 @@ els.contentInput.addEventListener("paste", e => {
     return;
   }
   const text = e.clipboardData.getData("text/plain");
-  if (text) { e.preventDefault(); document.execCommand("insertText", false, text); }
+  if (text) {
+    e.preventDefault();
+    insertLinkedTextAtMemoSelection(text);
+  }
 });
 
 // ── Auth UI ───────────────────────────────────────────────────────────────────

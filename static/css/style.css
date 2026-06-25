@@ -909,6 +909,43 @@ body.has-large-editor-open .note-head {
   border-color: var(--primary);
 }
 
+.content-input a.memo-link,
+.content-input a[href] {
+  position: relative;
+  color: var(--primary);
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+  cursor: text;
+}
+
+.content-input.is-memo-link-open-mode a.memo-link,
+.content-input.is-memo-link-open-mode a[href] {
+  cursor: pointer;
+}
+
+.content-input a.memo-link:hover,
+.content-input a[href]:hover {
+  color: #1d4ed8;
+}
+
+.content-input a.memo-link:hover::after,
+.content-input a[href]:hover::after {
+  content: attr(data-open-hint);
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 6px);
+  z-index: 5;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: #111827;
+  color: #ffffff;
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.18);
+}
+
 /* プレースホルダー（空のとき .is-empty クラスで表示） */
 .content-input.is-empty::before {
   content: attr(data-placeholder);
