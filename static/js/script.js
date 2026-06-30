@@ -38,8 +38,6 @@ const state = {
   mindMapMemoPreviewEnabled: true,
   mindMapPresentationMode: false,
   selectedId:      null,
-  pointerClientX:  null,
-  pointerClientY:  null,
   unlockedNoteIds: new Set(),
   expanded:        new Set(),
   saveTimer:       null,
@@ -8800,20 +8798,24 @@ function isTreeRenameBlockedByOverlay() {
   );
 }
 
-function getSelectedTreeRowAtPointer() {
-  if (state.pointerClientX === null || state.pointerClientY === null) return null;
-  const el = document.elementFromPoint(state.pointerClientX, state.pointerClientY);
-  const row = el?.closest?.(".tree-row");
-  return row && els.tree.contains(row) && row.dataset.id === state.selectedId ? row : null;
+function isTextEntryTarget(target) {
+  if (!target) return false;
+  const element = target.nodeType === Node.ELEMENT_NODE ? target : target.parentElement;
+  const active = document.activeElement;
+  return Boolean(
+    element?.closest?.("input, textarea, select, [contenteditable='true'], [role='textbox']") ||
+    active?.closest?.("input, textarea, select, [contenteditable='true'], [role='textbox']")
+  );
 }
 
-function getTreeRenameTargetFromEnter() {
-  return getSelectedTreeRowAtPointer()?.dataset.id || null;
+function getTreeRenameTargetFromEnter(e) {
+  if (isTextEntryTarget(e.target)) return null;
+  return state.selectedId;
 }
 
 function handleTreeRenameEnter(e) {
   if (!isPlainEnterKey(e) || state.isDraggingNote || isTreeRenameBlockedByOverlay()) return false;
-  const noteId = getTreeRenameTargetFromEnter();
+  const noteId = getTreeRenameTargetFromEnter(e);
   if (!noteId || isNoteAccessLocked(noteId)) return false;
   const row = els.tree.querySelector(`[data-id="${noteId}"]`);
   if (!row || row.querySelector(".tree-rename-input")) return false;
@@ -8948,14 +8950,6 @@ document.addEventListener("click", e => {
     closeMindMapSettingsPanel();
   }
 });
-
-function rememberPointerClientPosition(e) {
-  state.pointerClientX = e.clientX;
-  state.pointerClientY = e.clientY;
-}
-
-document.addEventListener("pointermove", rememberPointerClientPosition, { passive: true });
-document.addEventListener("pointerdown", rememberPointerClientPosition, { passive: true });
 
 document.addEventListener("keydown", e => {
   handleTreeRenameEnter(e);
