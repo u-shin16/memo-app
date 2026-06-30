@@ -38,6 +38,8 @@ const state = {
   mindMapMemoPreviewEnabled: true,
   mindMapPresentationMode: false,
   selectedId:      null,
+  pointerClientX:  null,
+  pointerClientY:  null,
   unlockedNoteIds: new Set(),
   expanded:        new Set(),
   saveTimer:       null,
@@ -3398,6 +3400,7 @@ function renderNode(note, treeCtx) {
   const title = document.createElement("span");
   title.className   = "tree-title";
   title.textContent = note.title || "無題";
+  title.title = "Enterで名前を変更";
   if (syncDisplayMapId) {
     const mapTitle = state.mindMapList.find(map => map.id === syncDisplayMapId)?.title;
     titleWrap.appendChild(createSyncPairBadge(
@@ -8776,6 +8779,50 @@ function showCtxMenu(x, y, noteId) {
 
 function hideCtxMenu() { els.contextMenu.hidden = true; state.contextNoteId = null; }
 
+function isPlainEnterKey(e) {
+  return (e.key === "Enter" || e.key === "NumpadEnter")
+    && !e.ctrlKey
+    && !e.metaKey
+    && !e.altKey
+    && !e.shiftKey
+    && !isImeComposing(e);
+}
+
+function isTreeRenameBlockedByOverlay() {
+  return Boolean(
+    els.confirmOverlay?.classList.contains("open") ||
+    !els.noteLockOverlay?.hidden ||
+    !els.cropOverlay?.hidden ||
+    !els.lightboxOverlay?.hidden ||
+    !els.templatesOverlay?.hidden ||
+    !els.appManagementOverlay?.hidden ||
+    !els.mindMapOverlay?.hidden
+  );
+}
+
+function getSelectedTreeRowAtPointer() {
+  if (state.pointerClientX === null || state.pointerClientY === null) return null;
+  const el = document.elementFromPoint(state.pointerClientX, state.pointerClientY);
+  const row = el?.closest?.(".tree-row");
+  return row && els.tree.contains(row) && row.dataset.id === state.selectedId ? row : null;
+}
+
+function getTreeRenameTargetFromEnter() {
+  return getSelectedTreeRowAtPointer()?.dataset.id || null;
+}
+
+function handleTreeRenameEnter(e) {
+  if (!isPlainEnterKey(e) || state.isDraggingNote || isTreeRenameBlockedByOverlay()) return false;
+  const noteId = getTreeRenameTargetFromEnter();
+  if (!noteId || isNoteAccessLocked(noteId)) return false;
+  const row = els.tree.querySelector(`[data-id="${noteId}"]`);
+  if (!row || row.querySelector(".tree-rename-input")) return false;
+  e.preventDefault();
+  e.stopPropagation();
+  startInlineRename(noteId);
+  return true;
+}
+
 function startInlineRename(noteId) {
   if (isNoteAccessLocked(noteId)) return;
   const row = els.tree.querySelector(`[data-id="${noteId}"]`);
@@ -8901,6 +8948,18 @@ document.addEventListener("click", e => {
     closeMindMapSettingsPanel();
   }
 });
+
+function rememberPointerClientPosition(e) {
+  state.pointerClientX = e.clientX;
+  state.pointerClientY = e.clientY;
+}
+
+document.addEventListener("pointermove", rememberPointerClientPosition, { passive: true });
+document.addEventListener("pointerdown", rememberPointerClientPosition, { passive: true });
+
+document.addEventListener("keydown", e => {
+  handleTreeRenameEnter(e);
+}, { capture: true });
 
 document.addEventListener("keydown", e => {
   setMemoLinkCursorMode(memoLinkModifierActiveFromKeyEvent(e));
