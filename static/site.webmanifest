@@ -1,6 +1,6 @@
 {
-  "name": "MusubiMemo",
-  "short_name": "MusubiMemo",
+  "name": "まとめときや",
+  "short_name": "まとめときや",
   "description": "アイデアを階層的に整理できるメモ帳アプリです。",
   "start_url": "/",
   "scope": "/",

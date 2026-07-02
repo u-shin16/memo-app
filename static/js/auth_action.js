@@ -13,8 +13,8 @@
   };
 
   const ERROR_MESSAGES = {
-    "auth/expired-action-code": "リンクの有効期限が切れています。MusubiMemoに戻って確認メールを再送してください。",
-    "auth/invalid-action-code": "リンクが無効、またはすでに使用済みです。MusubiMemoに戻って認証状況を更新してください。",
+    "auth/expired-action-code": "リンクの有効期限が切れています。まとめときやに戻って確認メールを再送してください。",
+    "auth/invalid-action-code": "リンクが無効、またはすでに使用済みです。まとめときやに戻って認証状況を更新してください。",
     "auth/user-disabled": "このアカウントは無効化されています。",
   };
 
@@ -30,7 +30,7 @@
   }
 
   function translateError(error) {
-    return ERROR_MESSAGES[error?.code] || "認証処理に失敗しました。MusubiMemoに戻って確認メールを再送してください。";
+    return ERROR_MESSAGES[error?.code] || "認証処理に失敗しました。まとめときやに戻って確認メールを再送してください。";
   }
 
   async function completeVerification() {
