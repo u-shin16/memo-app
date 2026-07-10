@@ -37,6 +37,21 @@ const state = {
   mindMapCanvasContextPos: null,
   mindMapMemoPreviewEnabled: true,
   mindMapPresentationMode: false,
+  collabRoomId:    null,
+  collabRoomLabel: "",
+  collabRoomRole:  null,
+  collabJoinRole:  "host",
+  collabGuestsReadOnly: false,
+  notesUnsubscribe: null,
+  mindMapsUnsubscribe: null,
+  presenceUnsubscribe: null,
+  roomUnsubscribe: null,
+  selfMemberUnsubscribe: null,
+  presenceHeartbeatTimer: null,
+  presenceWriteTimer: null,
+  collabPresence: [],
+  collabPresenceDraft: null,
+  currentPresenceArea: "viewing",
   selectedId:      null,
   unlockedNoteIds: new Set(),
   expanded:        new Set(),
@@ -71,6 +86,22 @@ const els = {
   noteListBtn:        document.getElementById("noteListBtn"),
   noteListPanel:      document.getElementById("noteListPanel"),
   noteListItems:      document.getElementById("noteListItems"),
+  collabStatusBtn:        document.getElementById("collabStatusBtn"),
+  collabStatusCount:      document.getElementById("collabStatusCount"),
+  mindMapCollabStatusBtn:   document.getElementById("mindMapCollabStatusBtn"),
+  mindMapCollabStatusCount: document.getElementById("mindMapCollabStatusCount"),
+  collabStatusPanel:      document.getElementById("collabStatusPanel"),
+  collabStatusClose:      document.getElementById("collabStatusClose"),
+  collabStatusRoomLabel:  document.getElementById("collabStatusRoomLabel"),
+  collabStatusMembers:    document.getElementById("collabStatusMembers"),
+  collabStatusHostSection: document.getElementById("collabStatusHostSection"),
+  collabStatusHostMenuBtn: document.getElementById("collabStatusHostMenuBtn"),
+  collabStatusHostMenu:    document.getElementById("collabStatusHostMenu"),
+  collabStatusReadOnlyBtn: document.getElementById("collabStatusReadOnlyBtn"),
+  collabStatusRegenerateBtn: document.getElementById("collabStatusRegenerateBtn"),
+  collabStatusEndRoomBtn: document.getElementById("collabStatusEndRoomBtn"),
+  collabStatusSettingsBtn: document.getElementById("collabStatusSettingsBtn"),
+  collabStatusLeaveBtn:   document.getElementById("collabStatusLeaveBtn"),
   mobileMenuBackdrop: document.getElementById("mobileMenuBackdrop"),
   noteHead:           document.querySelector(".note-head"),
   tree:             document.getElementById("tree"),
@@ -147,6 +178,7 @@ const els = {
   mindMapZoomInBtn: document.getElementById("mindMapZoomInBtn"),
   mindMapZoomLabel: document.getElementById("mindMapZoomLabel"),
   mindMapStatus:    document.getElementById("mindMapStatus"),
+  mindMapPresencePanel: document.getElementById("mindMapPresencePanel"),
   mindMapCanvas:    document.getElementById("mindMapCanvas"),
   mindMapScene:     document.getElementById("mindMapScene"),
   mindMapLinks:     document.getElementById("mindMapLinks"),
@@ -170,6 +202,7 @@ const els = {
   memoSettingsBtn:  document.getElementById("memoSettingsBtn"),
   memoSettingsPanel: document.getElementById("memoSettingsPanel"),
   memoSettingsClose: document.getElementById("memoSettingsClose"),
+  memoCollabBtn:    document.getElementById("memoCollabBtn"),
   appManageBtn:      document.getElementById("appManageBtn"),
   appManagementOverlay: document.getElementById("appManagementOverlay"),
   appManagementDialog: document.getElementById("appManagementDialog"),
@@ -178,6 +211,22 @@ const els = {
   appHowToDialog:    document.getElementById("appHowToDialog"),
   appHowToBack:      document.getElementById("appHowToBack"),
   appHowToClose:     document.getElementById("appHowToClose"),
+  appCollabBtn:      document.getElementById("appCollabBtn"),
+  appCollabDialog:   document.getElementById("appCollabDialog"),
+  appCollabBack:     document.getElementById("appCollabBack"),
+  appCollabClose:    document.getElementById("appCollabClose"),
+  appCollabMode:     document.getElementById("appCollabMode"),
+  appCollabDetail:   document.getElementById("appCollabDetail"),
+  appCollabForm:     document.getElementById("appCollabForm"),
+  appCollabHostBtn:  document.getElementById("appCollabHostBtn"),
+  appCollabGuestBtn: document.getElementById("appCollabGuestBtn"),
+  appCollabPassphraseLabel: document.getElementById("appCollabPassphraseLabel"),
+  appCollabPassphrase: document.getElementById("appCollabPassphrase"),
+  appCollabRegenerateBtn: document.getElementById("appCollabRegenerateBtn"),
+  appCollabShowPassphrase: document.getElementById("appCollabShowPassphrase"),
+  appCollabJoinBtn:  document.getElementById("appCollabJoinBtn"),
+  appCollabLeaveBtn: document.getElementById("appCollabLeaveBtn"),
+  appCollabError:    document.getElementById("appCollabError"),
   appNoteHowToTab:   document.getElementById("appNoteHowToTab"),
   appMindMapHowToTab: document.getElementById("appMindMapHowToTab"),
   appNoteHowToPanel: document.getElementById("appNoteHowToPanel"),
@@ -234,6 +283,10 @@ const els = {
   noteLockError:    document.getElementById("noteLockError"),
   noteLockCancel:   document.getElementById("noteLockCancel"),
   noteLockSubmit:   document.getElementById("noteLockSubmit"),
+  hostTransferOverlay: document.getElementById("hostTransferOverlay"),
+  hostTransferList:    document.getElementById("hostTransferList"),
+  hostTransferSkipBtn: document.getElementById("hostTransferSkipBtn"),
+  hostTransferCancelBtn: document.getElementById("hostTransferCancelBtn"),
   contextMenu:      document.getElementById("contextMenu"),
   mediaContextMenu: document.getElementById("mediaContextMenu"),
   mediaSizeSection: document.getElementById("mediaSizeSection"),
@@ -304,6 +357,12 @@ if (!STORAGE_ENABLED) {
   els.mediaBtn.hidden = true;
   if (els.mediaTrimBtn) els.mediaTrimBtn.hidden = true;
 }
+
+const COLLAB_STORAGE_KEY_PREFIX = "matometokiya:collab-room:v1:";
+const COLLAB_HASH_PREFIX = "matometokiya-collab-v1:";
+const COLLAB_PRESENCE_STALE_MS = 2 * 60 * 1000;
+const COLLAB_PRESENCE_WRITE_DELAY_MS = 700;
+const COLLAB_PRESENCE_HEARTBEAT_MS = 15000;
 
 // ── Toast ─────────────────────────────────────────────────────────────────────
 
@@ -735,6 +794,7 @@ function toggleLargeEditor() {
 
 let managementReturnFocus = null;
 let managementHowToMode = "memo";
+let collabStatusAnchorBtn = null;
 
 function showAppHowToView(mode, shouldFocus = false) {
   const showMindMap = mode === "mindmap";
@@ -755,12 +815,15 @@ function showAppManagementHome(shouldFocus = false) {
   if (els.appManagementDialog) els.appManagementDialog.hidden = false;
   if (els.appHowToDialog) els.appHowToDialog.hidden = true;
   if (els.appInfoDialog) els.appInfoDialog.hidden = true;
+  if (els.appCollabDialog) els.appCollabDialog.hidden = true;
   if (els.appAccountDialog) els.appAccountDialog.hidden = true;
   els.appHowToBtn?.setAttribute("aria-expanded", "false");
   els.appDataInfoBtn?.setAttribute("aria-expanded", "false");
+  els.appCollabBtn?.setAttribute("aria-expanded", "false");
   els.appAccountBtn?.setAttribute("aria-expanded", "false");
   els.appCreatorInfoBtn?.setAttribute("aria-expanded", "false");
   els.appContactBtn?.setAttribute("aria-expanded", "false");
+  els.memoCollabBtn?.setAttribute("aria-expanded", "false");
   els.accountBtn?.setAttribute("aria-expanded", "false");
   els.mindMapAccountBtn?.setAttribute("aria-expanded", "false");
   if (shouldFocus) requestAnimationFrame(() => els.appHowToBtn?.focus());
@@ -843,6 +906,1428 @@ async function handleSaveAppAccountDisplayName() {
   }
 }
 
+function collabStorageKey(uid = state.uid) {
+  return uid ? `${COLLAB_STORAGE_KEY_PREFIX}${uid}` : "";
+}
+
+function normalizeCollabPassphrase(value) {
+  return String(value || "").trim().replace(/\s+/g, " ");
+}
+
+function shortCollabId(roomId = state.collabRoomId) {
+  return roomId ? `${roomId.slice(0, 6)}...${roomId.slice(-4)}` : "";
+}
+
+function normalizeCollabRole(role) {
+  return role === "host" ? "host" : "guest";
+}
+
+function collabRoleLabel(role = state.collabRoomRole) {
+  return normalizeCollabRole(role) === "host" ? "ホスト" : "ゲスト";
+}
+
+async function sha256Hex(value) {
+  if (!crypto?.subtle || typeof TextEncoder === "undefined") {
+    throw new Error("このブラウザでは合言葉ルームを作成できません。");
+  }
+  const data = new TextEncoder().encode(value);
+  const digest = await crypto.subtle.digest("SHA-256", data);
+  return [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function generateRandomRoomId() {
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  return [...bytes].map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+// 合言葉のハッシュから、対応する共同ルームIDを引く。
+// ルームIDは合言葉から直接は計算せず、passphraseIndex を経由することで、
+// 「合言葉を作り直す」際に中身は同じルームのまま新しい合言葉だけを
+// 追加・古い合言葉だけを無効化できるようにしている。
+async function collabRoomIdFromPassphrase(passphrase) {
+  const normalized = normalizeCollabPassphrase(passphrase);
+  if (normalized.length < 4) throw new Error("合言葉（4桁の数字）を入力してください。");
+  const hash = await sha256Hex(`${COLLAB_HASH_PREFIX}${normalized}`);
+  const indexSnap = await db.collection("passphraseIndex").doc(hash).get();
+  return {
+    hash,
+    roomId: indexSnap.exists ? (indexSnap.data()?.room_id || null) : null,
+  };
+}
+
+function getSavedCollabRoom(uid = state.uid) {
+  const key = collabStorageKey(uid);
+  if (!key) return null;
+  try {
+    const saved = JSON.parse(localStorage.getItem(key) || "null");
+    if (!saved?.roomId || !/^[a-f0-9]{64}$/.test(saved.roomId)) return null;
+    return {
+      roomId: saved.roomId,
+      label: String(saved.label || "共同ルーム").slice(0, 80),
+      role: normalizeCollabRole(saved.role),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function saveCollabRoom(roomId, label, role = state.collabRoomRole) {
+  const key = collabStorageKey();
+  if (!key) return;
+  localStorage.setItem(key, JSON.stringify({
+    roomId,
+    label: String(label || "共同ルーム").slice(0, 80),
+    role: normalizeCollabRole(role),
+  }));
+}
+
+function clearSavedCollabRoom(uid = state.uid) {
+  const key = collabStorageKey(uid);
+  if (key) localStorage.removeItem(key);
+}
+
+function setCollabError(message = "") {
+  if (!els.appCollabError) return;
+  els.appCollabError.textContent = message;
+  els.appCollabError.hidden = !message;
+}
+
+function isPermissionDeniedError(err) {
+  return err?.code === "permission-denied"
+    || /Missing or insufficient permissions/i.test(err?.message || "");
+}
+
+function translateCollabError(err, fallback = "共同ルームに参加できませんでした。") {
+  if (isPermissionDeniedError(err)) {
+    return "共同編集用のFirestoreルールがまだ反映されていない可能性があります。Firebase ConsoleのFirestore Database > ルールで、このリポジトリのfirestore.rulesをPublishしてください。";
+  }
+  return err?.message || fallback;
+}
+
+function collabPresenceCollection(roomId = state.collabRoomId) {
+  if (!roomId) return null;
+  return db.collection("collabRooms").doc(roomId).collection("presence");
+}
+
+function collabPresenceDocRef(roomId = state.collabRoomId, uid = state.uid) {
+  if (!roomId || !uid) return null;
+  return collabPresenceCollection(roomId)?.doc(uid) || null;
+}
+
+function currentUserDisplayName() {
+  const user = auth?.currentUser;
+  const displayName = String(user?.displayName || "").trim();
+  if (displayName) return displayName.slice(0, 40);
+  const email = String(user?.email || "").trim();
+  if (email) return (email.split("@")[0] || email).slice(0, 40);
+  return "ユーザー";
+}
+
+function normalizePresenceDoc(doc) {
+  const data = doc.data() || {};
+  return {
+    uid: data.uid || doc.id,
+    display_name: String(data.display_name || "ユーザー").slice(0, 40),
+    email: String(data.email || "").slice(0, 120),
+    role: normalizeCollabRole(data.role),
+    area: String(data.area || "viewing"),
+    note_id: data.note_id || null,
+    note_title: String(data.note_title || "").slice(0, 120),
+    map_id: data.map_id || null,
+    map_title: String(data.map_title || "").slice(0, 80),
+    node_id: data.node_id || null,
+    node_title: String(data.node_title || "").slice(0, 80),
+    caret_offset: Number.isFinite(data.caret_offset) ? data.caret_offset : null,
+    updated_at: data.updated_at || "",
+    updated_at_ms: Number(data.updated_at_ms || 0),
+  };
+}
+
+function isFreshPresence(presence) {
+  return presence?.updated_at_ms && Date.now() - presence.updated_at_ms < COLLAB_PRESENCE_STALE_MS;
+}
+
+function isEditingPresence(presence) {
+  return Boolean(presence?.area) && !["idle", "viewing"].includes(presence.area);
+}
+
+function isNoteEditingPresence(presence) {
+  return ["title", "content"].includes(presence?.area);
+}
+
+function isMindMapNodeEditingPresence(presence) {
+  return ["mindmap-node-title", "mindmap-node-memo"].includes(presence?.area);
+}
+
+function presenceDisplayName(presence) {
+  return String(presence?.display_name || "ユーザー").slice(0, 40);
+}
+
+function presenceInitials(presence) {
+  const name = presenceDisplayName(presence).trim();
+  return (name.slice(0, 2) || "ユ").toUpperCase();
+}
+
+// uidから固定の色相を作り、同じ参加者は常に同じ色のカーソルフラグになるようにする。
+function presenceColor(uid) {
+  const str = String(uid || "");
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) hash = (hash * 31 + str.charCodeAt(i)) >>> 0;
+  const hue = hash % 360;
+  return `hsl(${hue}, 72%, 42%)`;
+}
+
+function presenceAreaLabel(area) {
+  switch (area) {
+    case "title": return "タイトルを編集中";
+    case "content": return "本文を編集中";
+    case "mindmap-title": return "マップ名を編集中";
+    case "mindmap-node-title": return "ノード名を編集中";
+    case "mindmap-node-memo": return "ノードメモを編集中";
+    case "mindmap": return "マインドマップを操作中";
+    case "viewing": return "表示中";
+    default: return "作業中";
+  }
+}
+
+function presenceLocationLabel(presence) {
+  if (!presence) return "";
+  const action = presenceAreaLabel(presence.area);
+  if (presence.area?.startsWith("mindmap")) {
+    const mapTitle = presence.map_title || "マインドマップ";
+    const nodeTitle = presence.node_title ? ` / ${presence.node_title}` : "";
+    return `${mapTitle}${nodeTitle}・${action}`;
+  }
+  const noteTitle = presence.note_title || "メモ";
+  return `${noteTitle}・${action}`;
+}
+
+function getPresenceForNote(noteId, { editingOnly = false } = {}) {
+  if (!noteId) return [];
+  return state.collabPresence.filter(presence => (
+    presence.note_id === noteId &&
+    (!editingOnly || isNoteEditingPresence(presence))
+  ));
+}
+
+function getPresenceForMindMapNode(nodeId, { editingOnly = false } = {}) {
+  if (!nodeId || !state.mindMap?.id) return [];
+  return state.collabPresence.filter(presence => (
+    presence.map_id === state.mindMap.id &&
+    presence.node_id === nodeId &&
+    (!editingOnly || isMindMapNodeEditingPresence(presence))
+  ));
+}
+
+function createPresenceChip(presence) {
+  const chip = document.createElement("span");
+  chip.className = `collab-presence-chip${isEditingPresence(presence) ? " is-editing" : ""}`;
+  chip.title = `${presenceDisplayName(presence)}: ${presenceLocationLabel(presence)}`;
+
+  const avatar = document.createElement("span");
+  avatar.className = "collab-presence-avatar";
+  avatar.textContent = presenceInitials(presence);
+
+  const text = document.createElement("span");
+  text.className = "collab-presence-text";
+  text.textContent = `${presenceDisplayName(presence)}・${presenceAreaLabel(presence.area)}`;
+
+  chip.append(avatar, text);
+  return chip;
+}
+
+function createTreePresenceBadge(presences) {
+  const badge = document.createElement("span");
+  badge.className = "tree-presence-badge";
+  const names = presences.map(presenceDisplayName);
+  badge.textContent = presences.length > 1
+    ? `${presenceInitials(presences[0])}+${presences.length - 1}`
+    : presenceInitials(presences[0]);
+  badge.title = names.join("、") + " が編集中";
+  return badge;
+}
+
+function createMindMapPresenceBadge(presences) {
+  const badge = document.createElement("span");
+  badge.className = "mindmap-node-presence";
+  const names = presences.map(presenceDisplayName);
+  badge.textContent = presences.length > 1
+    ? `${presenceInitials(presences[0])}+${presences.length - 1}`
+    : presenceInitials(presences[0]);
+  badge.title = names.join("、") + " が編集中";
+  return badge;
+}
+
+function renderMindMapPresencePanel() {
+  const panel = els.mindMapPresencePanel;
+  if (!panel) return;
+  panel.innerHTML = "";
+  const mapId = state.mindMap?.id;
+  const presences = isCollabActive() && mapId
+    ? state.collabPresence.filter(presence => presence.map_id === mapId)
+    : [];
+  panel.hidden = presences.length === 0;
+  if (panel.hidden) return;
+
+  presences.forEach(presence => panel.appendChild(createPresenceChip(presence)));
+}
+
+let collabCaretLayerEl = null;
+
+function getCollabCaretLayer() {
+  if (!collabCaretLayerEl) {
+    collabCaretLayerEl = document.createElement("div");
+    collabCaretLayerEl.className = "collab-caret-layer";
+    document.body.appendChild(collabCaretLayerEl);
+  }
+  return collabCaretLayerEl;
+}
+
+// 共同編集者が今どこにカーソルを置いているかを、本文中に旗アイコンで表示する。
+// 各参加者は presence として文字数オフセットをブロードキャストしており、
+// ここでは自分側のDOMで同じオフセットの位置を逆算して旗を配置する。
+function renderCollabCaretFlags() {
+  const layer = getCollabCaretLayer();
+  const canShow = isCollabActive() &&
+    state.selectedId &&
+    els.contentInput?.contentEditable === "true" &&
+    Boolean(els.mindMapOverlay?.hidden);
+  if (!canShow) {
+    layer.innerHTML = "";
+    return;
+  }
+
+  const contentRect = els.contentInput.getBoundingClientRect();
+  const presences = state.collabPresence.filter(p => (
+    p.note_id === state.selectedId && p.area === "content" && p.caret_offset != null
+  ));
+
+  const seenUids = new Set();
+  presences.forEach(presence => {
+    const range = resolveTextOffsetToRange(els.contentInput, presence.caret_offset);
+    const rect = range?.getBoundingClientRect();
+    const visible = rect && rect.top >= contentRect.top - 2 && rect.top <= contentRect.bottom;
+    let flag = layer.querySelector(`[data-uid="${presence.uid}"]`);
+    if (!visible) {
+      flag?.remove();
+      return;
+    }
+    seenUids.add(presence.uid);
+
+    if (!flag) {
+      flag = document.createElement("div");
+      flag.className = "collab-caret-flag";
+      flag.dataset.uid = presence.uid;
+      flag.innerHTML = `<span class="collab-caret-flag-bar"></span><span class="collab-caret-flag-label"></span>`;
+      layer.appendChild(flag);
+    }
+    flag.style.setProperty("--collab-caret-color", presenceColor(presence.uid));
+    flag.style.setProperty("--collab-caret-height", `${rect.height || 22}px`);
+    flag.style.transform = `translate(${rect.left}px, ${rect.top}px)`;
+    flag.querySelector(".collab-caret-flag-label").textContent = presenceDisplayName(presence);
+  });
+
+  layer.querySelectorAll("[data-uid]").forEach(el => {
+    if (!seenUids.has(el.dataset.uid)) el.remove();
+  });
+}
+
+function renderCollabPresenceUI() {
+  updateCollabStatusUI();
+  renderMindMapPresencePanel();
+  renderCollabCaretFlags();
+  if (state.data && !els.tree?.querySelector(".tree-rename-input")) renderTree();
+  const editingMindMapField = ["mindmap-title", "mindmap-node-title", "mindmap-node-memo"].includes(detectPresenceArea());
+  if (state.mindMap && !els.mindMapOverlay?.hidden && !editingMindMapField && !isMindMapRemoteRenderBlocked()) {
+    renderMindMap();
+  } else if (state.mindMap && !els.mindMapOverlay?.hidden) {
+    refreshMindMapNodePresenceBadges();
+  }
+}
+
+// コンテンツ編集領域内でのキャレット位置を「先頭からの文字数」として取得する。
+// この数値は共同編集者へブロードキャストし、相手側で同じ数え方で位置を
+// 逆算してカーソル位置フラグを表示するために使う。
+function getCaretTextOffset(container) {
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0) return null;
+  const range = selection.getRangeAt(0);
+  if (!container.contains(range.startContainer)) return null;
+  const preRange = document.createRange();
+  preRange.selectNodeContents(container);
+  preRange.setEnd(range.startContainer, range.startOffset);
+  return preRange.toString().length;
+}
+
+function resolveTextOffsetToRange(container, offset) {
+  if (offset == null || offset < 0) return null;
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+  let remaining = offset;
+  let node = walker.nextNode();
+  let lastTextNode = null;
+  while (node) {
+    lastTextNode = node;
+    const len = node.nodeValue.length;
+    if (remaining <= len) {
+      const range = document.createRange();
+      range.setStart(node, remaining);
+      range.collapse(true);
+      return range;
+    }
+    remaining -= len;
+    node = walker.nextNode();
+  }
+  if (lastTextNode) {
+    const range = document.createRange();
+    range.setStart(lastTextNode, lastTextNode.length);
+    range.collapse(true);
+    return range;
+  }
+  return null;
+}
+
+function buildCollabPresence(area = detectPresenceArea()) {
+  const now = Date.now();
+  const user = auth?.currentUser;
+  const note = getSelectedNote();
+  const map = state.mindMap;
+  const node = getMindMapNode(state.mindMapSelectedId);
+  const data = {
+    uid: state.uid,
+    room_id: state.collabRoomId,
+    display_name: currentUserDisplayName(),
+    email: String(user?.email || "").slice(0, 120),
+    role: normalizeCollabRole(state.collabRoomRole),
+    area,
+    caret_offset: null,
+    updated_at: new Date(now).toISOString(),
+    updated_at_ms: now,
+  };
+
+  if (area === "content") {
+    data.caret_offset = getCaretTextOffset(els.contentInput);
+  } else if (area === "title" && typeof els.titleInput.selectionStart === "number") {
+    data.caret_offset = els.titleInput.selectionStart;
+  }
+
+  if (area.startsWith("mindmap")) {
+    const includeNode = ["mindmap", "mindmap-node-title", "mindmap-node-memo"].includes(area);
+    Object.assign(data, {
+      map_id: map?.id || null,
+      map_title: String(map?.title || "マインドマップ").slice(0, 80),
+      node_id: includeNode ? (node?.id || null) : null,
+      node_title: includeNode ? String(node?.title || "").slice(0, 80) : "",
+      note_id: null,
+      note_title: "",
+    });
+  } else {
+    Object.assign(data, {
+      note_id: note?.id || null,
+      note_title: String(note?.title || "メモ").slice(0, 120),
+      map_id: null,
+      map_title: "",
+      node_id: null,
+      node_title: "",
+    });
+  }
+  return data;
+}
+
+function detectPresenceArea() {
+  const active = document.activeElement;
+  if (!els.mindMapOverlay?.hidden) {
+    if (active === els.mindMapTitleInput) return "mindmap-title";
+    if (active === els.mindMapNodeTitleInput) return "mindmap-node-title";
+    if (active === els.mindMapNodeMemoInput) return "mindmap-node-memo";
+    return "mindmap";
+  }
+  if (active === els.titleInput) return "title";
+  if (active === els.contentInput || els.contentInput?.contains(active)) return "content";
+  return state.selectedId ? "viewing" : "idle";
+}
+
+async function flushCollabPresence() {
+  clearTimeout(state.presenceWriteTimer);
+  state.presenceWriteTimer = null;
+  const draft = state.collabPresenceDraft;
+  if (!draft?.room_id || !draft.uid || !isCollabActive()) return;
+  state.collabPresenceDraft = null;
+  try {
+    await collabPresenceDocRef(draft.room_id, draft.uid)?.set(draft, { merge: true });
+  } catch (err) {
+    console.warn("[collab presence] write failed", err);
+  }
+}
+
+function setCollabPresence(area = detectPresenceArea(), options = {}) {
+  if (!isCollabActive() || !state.uid) return;
+  state.currentPresenceArea = area;
+  state.collabPresenceDraft = buildCollabPresence(area);
+  clearTimeout(state.presenceWriteTimer);
+  if (options.immediate) {
+    void flushCollabPresence();
+  } else {
+    state.presenceWriteTimer = setTimeout(flushCollabPresence, COLLAB_PRESENCE_WRITE_DELAY_MS);
+  }
+}
+
+function refreshCollabPresence(options = {}) {
+  setCollabPresence(detectPresenceArea(), options);
+}
+
+function startCollabPresenceHeartbeat() {
+  clearInterval(state.presenceHeartbeatTimer);
+  state.presenceHeartbeatTimer = null;
+  if (!isCollabActive()) return;
+  refreshCollabPresence({ immediate: true });
+  state.presenceHeartbeatTimer = setInterval(() => {
+    refreshCollabPresence({ immediate: true });
+  }, COLLAB_PRESENCE_HEARTBEAT_MS);
+}
+
+async function clearCollabPresence(roomId = state.collabRoomId, uid = state.uid) {
+  clearTimeout(state.presenceWriteTimer);
+  state.presenceWriteTimer = null;
+  state.collabPresenceDraft = null;
+  if (!roomId || !uid) return;
+  try {
+    await collabPresenceDocRef(roomId, uid)?.delete();
+  } catch (err) {
+    console.warn("[collab presence] clear failed", err);
+  }
+}
+
+function applyPresenceSnapshot(snap) {
+  state.collabPresence = snap.docs
+    .map(normalizePresenceDoc)
+    .filter(presence => presence.uid !== state.uid && isFreshPresence(presence))
+    .sort((a, b) => b.updated_at_ms - a.updated_at_ms);
+  renderCollabPresenceUI();
+}
+
+// ホスト譲渡を検知する。members/{uid} のroleは本人しか書けない権限設計なので、
+// 「room.host_uidが自分になった」ことをこのリスナーで検知し、自分の
+// memberドキュメントのroleを自分で"host"へ更新する。
+function applyRoomSnapshot(doc) {
+  if (!isCollabActive() || !doc.exists || doc.id !== state.collabRoomId) return;
+  const data = doc.data() || {};
+  const hostUid = data.host_uid || null;
+  const iAmHostNow = hostUid === state.uid;
+  const wasHost = state.collabRoomRole === "host";
+  const readOnlyChanged = Boolean(data.guests_read_only) !== state.collabGuestsReadOnly;
+  state.collabGuestsReadOnly = Boolean(data.guests_read_only);
+
+  // ホストが合言葉を作り直したら、全員のローカルな表示・保存済み合言葉も
+  // 最新のものへ揃える（ルーム自体は変わらないので、この値だけ追従させればよい）。
+  const newLabel = String(data.label_hint || "").trim();
+  const labelChanged = Boolean(newLabel) && newLabel !== state.collabRoomLabel;
+  if (labelChanged) {
+    state.collabRoomLabel = newLabel;
+    saveCollabRoom(state.collabRoomId, newLabel, state.collabRoomRole);
+    updateCollabUI();
+    if (!wasHost) showToast("ホストが合言葉を作り直しました。");
+  }
+
+  if (readOnlyChanged && !wasHost) {
+    renderEditor();
+    if (state.mindMap && !els.mindMapOverlay?.hidden) renderMindMap();
+    showToast(state.collabGuestsReadOnly
+      ? "ホストが編集を閲覧専用にしました。"
+      : "ホストが編集を許可しました。");
+  }
+  updateCollabStatusUI();
+  if (!els.collabStatusPanel?.hidden) renderCollabStatusPanel();
+
+  if (iAmHostNow === wasHost) return;
+
+  state.collabRoomRole = iAmHostNow ? "host" : "guest";
+  saveCollabRoom(state.collabRoomId, state.collabRoomLabel, state.collabRoomRole);
+  updateCollabUI();
+  updateCollabStatusUI();
+  renderEditor();
+
+  if (iAmHostNow) {
+    collabPresenceCollection()?.doc(state.uid).set({ role: "host" }, { merge: true }).catch(() => {});
+    db.collection("collabRooms").doc(state.collabRoomId).collection("members").doc(state.uid)
+      .set({ uid: state.uid, role: "host" }, { merge: true })
+      .then(() => showToast("あなたが共同ルームのホストになりました。"))
+      .catch(() => {});
+  } else {
+    showToast("ホストが別の参加者に交代しました。");
+  }
+}
+
+// 自分のmemberドキュメントが（ホストの操作で）消えたら、退出させられた
+// ものとして個人メモへ戻す。ルーム終了時にも使う（合言葉の作り直しは
+// 中身が同じルームのまま行われるため、参加者は退出させられない）。
+let _handlingRoomRemoval = false;
+async function applySelfMemberSnapshot(doc) {
+  if (!isCollabActive() || doc.exists || _handlingRoomRemoval) return;
+  _handlingRoomRemoval = true;
+  const roomId = state.collabRoomId;
+  try {
+    // 退出させられた理由（キック／ルーム終了）に応じてメッセージを変える。
+    // ルームドキュメント自体はメンバーでなくても読めるので、削除前に
+    // ホスト側が書き込んでおいたフラグを見て判断する。
+    let message = "ホストによって共同ルームから退出させられました。";
+    try {
+      const roomSnap = await db.collection("collabRooms").doc(roomId).get();
+      const roomData = roomSnap.exists ? roomSnap.data() : null;
+      if (roomData?.ended_at) {
+        message = "ホストが共同ルームを終了しました。個人メモに戻りました。";
+      }
+    } catch {}
+    stopWorkspaceSnapshots();
+    clearSavedCollabRoom();
+    state.collabRoomId = null;
+    state.collabRoomLabel = "";
+    state.collabRoomRole = null;
+    await reloadCurrentWorkspace();
+    showToast(message);
+  } finally {
+    _handlingRoomRemoval = false;
+  }
+}
+
+function updateCollabUI() {
+  if (els.appCollabMode) {
+    els.appCollabMode.textContent = isCollabActive()
+      ? `共同編集中: ${state.collabRoomLabel || "共同ルーム"}`
+      : "個人メモ";
+  }
+  if (els.appCollabDetail) {
+    els.appCollabDetail.textContent = isCollabActive()
+      ? `${collabRoleLabel()}・ルーム ${shortCollabId()}`
+      : "このアカウント専用";
+  }
+  if (els.appCollabLeaveBtn) els.appCollabLeaveBtn.hidden = !isCollabActive();
+  // 共同作業中はホスト/ゲスト選択と合言葉入力フォームがまぎらわしいので隠す。
+  // ルームに入っていない時だけ、新規参加用のフォームを表示する。
+  if (els.appCollabForm) els.appCollabForm.hidden = isCollabActive();
+  if (els.newRootBtn) {
+    els.newRootBtn.disabled = isCollabActive();
+    els.newRootBtn.title = isCollabActive()
+      ? "共同作業中は新しい親メモを追加できません"
+      : "最上位メモを追加";
+  }
+}
+
+function updateCollabStatusUI() {
+  const active = isCollabActive();
+  if (els.collabStatusBtn) els.collabStatusBtn.hidden = !active;
+  if (els.mindMapCollabStatusBtn) els.mindMapCollabStatusBtn.hidden = !active;
+  if (!active) {
+    closeCollabStatusPanel();
+    return;
+  }
+  const count = state.collabPresence.length + 1;
+  [els.collabStatusCount, els.mindMapCollabStatusCount].forEach(el => {
+    if (!el) return;
+    el.textContent = String(count);
+    el.hidden = false;
+  });
+  if (!els.collabStatusPanel?.hidden) renderCollabStatusPanel();
+}
+
+function renderCollabStatusPanel() {
+  if (!isCollabActive()) return;
+  if (els.collabStatusRoomLabel) {
+    els.collabStatusRoomLabel.textContent =
+      `${state.collabRoomLabel || "共同ルーム"}・${collabRoleLabel()}として参加中`;
+  }
+  if (!els.collabStatusMembers) return;
+  els.collabStatusMembers.innerHTML = "";
+
+  const self = {
+    uid: state.uid,
+    display_name: currentUserDisplayName(),
+    role: state.collabRoomRole,
+    area: state.currentPresenceArea,
+    isSelf: true,
+  };
+  const members = [self, ...state.collabPresence];
+
+  members.forEach(member => {
+    const li = document.createElement("li");
+    li.className = "collab-status-member";
+
+    const avatar = document.createElement("span");
+    avatar.className = "collab-presence-avatar";
+    avatar.textContent = presenceInitials(member);
+
+    const info = document.createElement("span");
+    info.className = "collab-status-member-info";
+
+    const name = document.createElement("span");
+    name.className = "collab-status-member-name";
+    name.textContent = member.isSelf
+      ? `${presenceDisplayName(member)}（自分）`
+      : presenceDisplayName(member);
+
+    const meta = document.createElement("span");
+    meta.className = "collab-status-member-meta";
+    meta.textContent = member.isSelf
+      ? collabRoleLabel(member.role) + (isGuestReadOnly() ? "・閲覧専用" : "")
+      : `${collabRoleLabel(member.role)}・${presenceLocationLabel(member)}`;
+
+    info.append(name, meta);
+    li.append(avatar, info);
+
+    if (!member.isSelf && state.collabRoomRole === "host") {
+      const actions = document.createElement("div");
+      actions.className = "collab-status-member-actions";
+
+      const makeHostBtn = document.createElement("button");
+      makeHostBtn.type = "button";
+      makeHostBtn.className = "collab-status-member-action-btn";
+      makeHostBtn.title = "ホストにする";
+      makeHostBtn.setAttribute("aria-label", `${presenceDisplayName(member)}をホストにする`);
+      makeHostBtn.textContent = "👑";
+      makeHostBtn.addEventListener("click", () => requestTransferHostTo(member));
+      actions.appendChild(makeHostBtn);
+
+      const kickBtn = document.createElement("button");
+      kickBtn.type = "button";
+      kickBtn.className = "collab-status-member-action-btn danger";
+      kickBtn.title = "退出させる";
+      kickBtn.setAttribute("aria-label", `${presenceDisplayName(member)}を退出させる`);
+      kickBtn.textContent = "✕";
+      kickBtn.addEventListener("click", () => requestKickMember(member));
+      actions.appendChild(kickBtn);
+
+      li.appendChild(actions);
+    }
+
+    els.collabStatusMembers.appendChild(li);
+  });
+
+  const isHost = state.collabRoomRole === "host";
+  if (els.collabStatusHostSection) els.collabStatusHostSection.hidden = !isHost;
+  if (els.collabStatusReadOnlyBtn) {
+    els.collabStatusReadOnlyBtn.textContent = state.collabGuestsReadOnly
+      ? "ゲストの編集を許可する"
+      : "ゲストを閲覧専用にする";
+  }
+}
+
+function positionCollabStatusPanel() {
+  if (!els.collabStatusPanel || els.collabStatusPanel.hidden) return;
+  const btn = collabStatusAnchorBtn || els.collabStatusBtn;
+  if (!btn) return;
+  const rect = btn.getBoundingClientRect();
+  const edge = 8;
+  const width = els.collabStatusPanel.offsetWidth;
+  const left = Math.max(edge, Math.min(rect.right - width, window.innerWidth - width - edge));
+  els.collabStatusPanel.style.top = `${rect.bottom + 6}px`;
+  els.collabStatusPanel.style.left = `${left}px`;
+  els.collabStatusPanel.style.right = "auto";
+}
+
+function openCollabStatusPanel(anchorBtn) {
+  if (!els.collabStatusPanel || !isCollabActive()) return;
+  closeMemoFormatPanel();
+  closeMemoSettingsPanel();
+  closeNoteListPanel();
+  collabStatusAnchorBtn = anchorBtn || els.collabStatusBtn;
+  setCollabStatusHostMenuOpen(false);
+  renderCollabStatusPanel();
+  els.collabStatusPanel.hidden = false;
+  collabStatusAnchorBtn?.setAttribute("aria-expanded", "true");
+  positionCollabStatusPanel();
+}
+
+function closeCollabStatusPanel() {
+  if (!els.collabStatusPanel || els.collabStatusPanel.hidden) return;
+  els.collabStatusPanel.hidden = true;
+  els.collabStatusBtn?.setAttribute("aria-expanded", "false");
+  els.mindMapCollabStatusBtn?.setAttribute("aria-expanded", "false");
+  collabStatusAnchorBtn = null;
+  setCollabStatusHostMenuOpen(false);
+}
+
+function setCollabStatusHostMenuOpen(open) {
+  if (els.collabStatusHostMenu) els.collabStatusHostMenu.hidden = !open;
+  els.collabStatusHostMenuBtn?.setAttribute("aria-expanded", String(open));
+}
+
+function toggleCollabStatusPanel(anchorBtn) {
+  if (els.collabStatusPanel?.hidden) openCollabStatusPanel(anchorBtn);
+  else closeCollabStatusPanel();
+}
+
+// 4桁の数字をランダムに作る（例: 0483, 9217）。ホスト側の合言葉は
+// これを自動生成し、ゲストはそれを聞いて入力するだけにする。
+function generateCollabCode() {
+  return String(Math.floor(Math.random() * 10000)).padStart(4, "0");
+}
+
+function showCollabPassphrase(show) {
+  if (els.appCollabShowPassphrase) els.appCollabShowPassphrase.checked = show;
+  if (els.appCollabPassphrase) els.appCollabPassphrase.type = show ? "text" : "password";
+}
+
+function setCollabJoinRole(role) {
+  state.collabJoinRole = normalizeCollabRole(role);
+  const isHost = state.collabJoinRole === "host";
+  els.appCollabHostBtn?.setAttribute("aria-pressed", String(isHost));
+  els.appCollabGuestBtn?.setAttribute("aria-pressed", String(!isHost));
+  if (els.appCollabJoinBtn) {
+    els.appCollabJoinBtn.textContent = isHost ? "ホストとして開始" : "ゲストとして参加";
+  }
+  if (els.appCollabPassphraseLabel) {
+    els.appCollabPassphraseLabel.textContent = isHost ? "合言葉（自動生成）" : "合言葉";
+  }
+  if (els.appCollabRegenerateBtn) els.appCollabRegenerateBtn.hidden = !isHost;
+  if (els.appCollabPassphrase) {
+    if (isHost) {
+      els.appCollabPassphrase.value = generateCollabCode();
+      showCollabPassphrase(true);
+    } else {
+      els.appCollabPassphrase.value = "";
+      showCollabPassphrase(false);
+    }
+  }
+}
+
+function openAppCollab() {
+  if (!els.appManagementDialog || !els.appCollabDialog) return;
+  updateCollabUI();
+  setCollabJoinRole(state.collabRoomRole || state.collabJoinRole || "host");
+  setCollabError("");
+  els.appManagementDialog.hidden = true;
+  els.appCollabDialog.hidden = false;
+  els.appCollabBtn?.setAttribute("aria-expanded", "true");
+  requestAnimationFrame(() => els.appCollabPassphrase?.focus());
+}
+
+function openAppCollabFromAnchor(anchor) {
+  openAppManagement(anchor);
+  openAppCollab();
+}
+
+function setCollabBusy(busy) {
+  if (els.appCollabJoinBtn) els.appCollabJoinBtn.disabled = busy;
+  if (els.appCollabLeaveBtn) els.appCollabLeaveBtn.disabled = busy;
+  if (els.appCollabHostBtn) els.appCollabHostBtn.disabled = busy;
+  if (els.appCollabGuestBtn) els.appCollabGuestBtn.disabled = busy;
+  if (els.appCollabPassphrase) els.appCollabPassphrase.disabled = busy;
+}
+
+function stopWorkspaceSnapshots() {
+  if (typeof state.notesUnsubscribe === "function") state.notesUnsubscribe();
+  if (typeof state.mindMapsUnsubscribe === "function") state.mindMapsUnsubscribe();
+  if (typeof state.presenceUnsubscribe === "function") state.presenceUnsubscribe();
+  if (typeof state.roomUnsubscribe === "function") state.roomUnsubscribe();
+  if (typeof state.selfMemberUnsubscribe === "function") state.selfMemberUnsubscribe();
+  clearInterval(state.presenceHeartbeatTimer);
+  clearTimeout(state.presenceWriteTimer);
+  state.notesUnsubscribe = null;
+  state.mindMapsUnsubscribe = null;
+  state.presenceUnsubscribe = null;
+  state.roomUnsubscribe = null;
+  state.selfMemberUnsubscribe = null;
+  state.presenceHeartbeatTimer = null;
+  state.presenceWriteTimer = null;
+  state.collabPresenceDraft = null;
+  state.collabPresence = [];
+  state.collabGuestsReadOnly = false;
+  renderMindMapPresencePanel();
+}
+
+function isMemoEditorActive() {
+  const active = document.activeElement;
+  return active === els.titleInput || active === els.contentInput || els.contentInput?.contains(active);
+}
+
+function normalizeNoteDoc(doc) {
+  const data = doc.data() || {};
+  return { ...data, id: doc.id, locked: Boolean(data.locked) };
+}
+
+function selectFirstAvailableNote() {
+  const roots = orderTreeChildren(null, getNotes().filter(n => n.parent_id === null));
+  state.selectedId = roots.find(note => !isNoteAccessLocked(note.id))?.id ?? null;
+}
+
+// 相手がタイピング中でも、画像のサイズ変更・トリミングだけは
+// data-media-id で対応づけて即座に反映する（本文テキストやキャレットは触らない）。
+function mergeRemoteMediaIntoEditor(remoteContent) {
+  const holder = document.createElement("div");
+  holder.innerHTML = contentToHtml(remoteContent);
+  const remoteFigures = holder.querySelectorAll(".inline-media-figure[data-media-id]");
+  if (remoteFigures.length === 0) return false;
+
+  const localFigures = new Map();
+  els.contentInput.querySelectorAll(".inline-media-figure[data-media-id]").forEach(figure => {
+    localFigures.set(figure.dataset.mediaId, figure);
+  });
+  if (localFigures.size === 0) return false;
+
+  let changed = false;
+  remoteFigures.forEach(remoteFigure => {
+    const localFigure = localFigures.get(remoteFigure.dataset.mediaId);
+    if (!localFigure) return;
+
+    const remoteSize = remoteFigure.dataset.size || "";
+    if ((localFigure.dataset.size || "") !== remoteSize) {
+      if (remoteSize) localFigure.dataset.size = remoteSize;
+      else delete localFigure.dataset.size;
+      changed = true;
+    }
+
+    const remoteMedia = remoteFigure.querySelector(".inline-media");
+    const localMedia = localFigure.querySelector(".inline-media");
+    if (remoteMedia && localMedia && remoteMedia.tagName === localMedia.tagName) {
+      const remoteSrc = remoteMedia.getAttribute("src") || "";
+      if (remoteSrc && localMedia.getAttribute("src") !== remoteSrc) {
+        localMedia.setAttribute("src", remoteSrc);
+        changed = true;
+      }
+    }
+  });
+  return changed;
+}
+
+function applyNotesSnapshot(snap) {
+  if (!isCollabActive()) return;
+  const previousSelectedId = state.selectedId;
+  const preserveEditor = Boolean(
+    previousSelectedId &&
+    isMemoEditorActive() &&
+    hasUnsavedEditorChange()
+  );
+
+  state.data = { notes: snap.docs.map(normalizeNoteDoc) };
+  if (!state.selectedId || !getSelectedNote() || isNoteAccessLocked(state.selectedId)) {
+    selectFirstAvailableNote();
+    if (previousSelectedId !== state.selectedId) setLargeEditorOpen(false);
+  }
+
+  renderTree();
+  if (preserveEditor && previousSelectedId === state.selectedId && getSelectedNote()) {
+    mergeRemoteMediaIntoEditor(getSelectedNote().content);
+    els.saveStatus.textContent = "共同編集中...";
+    updateUndoButton();
+    return;
+  }
+  renderEditor();
+  updateUndoButton();
+}
+
+function isMindMapRemoteRenderBlocked() {
+  return Boolean(
+    state.mindMapEditSnapshot ||
+    state.mindMapNodeDrag ||
+    state.mindMapPanning ||
+    state.isApplyingMindMapUndo ||
+    isMindMapInlineNodeEditing()
+  );
+}
+
+function applyMindMapsSnapshot(snap) {
+  if (!isCollabActive()) return;
+  const docs = snap.docs
+    .map(doc => ({ id: doc.id, data: doc.data() }))
+    .sort((a, b) => String(b.data.updated_at ?? "").localeCompare(String(a.data.updated_at ?? "")));
+  state.mindMapList = docs.map(({ id, data }) => mapListEntryFromMindMap({ ...data, id }));
+
+  if (!isMindMapRemoteRenderBlocked()) {
+    const activeDoc = docs.find(doc => doc.id === state.mindMap?.id) ?? docs[0] ?? null;
+    if (activeDoc) {
+      state.mindMap = normalizeMindMap(activeDoc.data, activeDoc.id);
+      state.mindMapSelectedId = state.mindMap.selected_node_id;
+      state.mindMapLoaded = true;
+      if (!els.mindMapOverlay.hidden) {
+        renderMindMap();
+        els.mindMapStatus.textContent = mindMapSavedStatus(state.mindMap);
+      }
+    } else if (state.mindMap) {
+      state.mindMap = null;
+      state.mindMapSelectedId = null;
+      state.mindMapLoaded = false;
+      clearMindMapUndoStack();
+    }
+  }
+
+  if (!els.mindMapListPanel?.hidden) renderMindMapList();
+}
+
+function startWorkspaceSnapshots() {
+  stopWorkspaceSnapshots();
+  if (!isCollabActive()) return;
+  state.notesUnsubscribe = notesCollection().onSnapshot(
+    applyNotesSnapshot,
+    err => showToast(translateCollabError(err, "共同メモの更新を受信できませんでした。")),
+  );
+  state.mindMapsUnsubscribe = mindMapsCollection().onSnapshot(
+    applyMindMapsSnapshot,
+    err => showToast(translateCollabError(err, "共同マップの更新を受信できませんでした。")),
+  );
+  state.presenceUnsubscribe = collabPresenceCollection()?.onSnapshot(
+    applyPresenceSnapshot,
+    err => showToast(translateCollabError(err, "共同編集メンバーの状態を受信できませんでした。")),
+  ) || null;
+  state.roomUnsubscribe = db.collection("collabRooms").doc(state.collabRoomId).onSnapshot(
+    applyRoomSnapshot,
+    () => {},
+  );
+  state.selfMemberUnsubscribe = db.collection("collabRooms").doc(state.collabRoomId)
+    .collection("members").doc(state.uid)
+    .onSnapshot(applySelfMemberSnapshot, () => {});
+  startCollabPresenceHeartbeat();
+}
+
+async function readCurrentWorkspaceSeed(standaloneMindMapId = null) {
+  // メモと同期していないマインドマップ単体を共有する場合は、そのマップだけを渡す。
+  if (standaloneMindMapId) {
+    const mapDoc = await mindMapsCollection().doc(standaloneMindMapId).get();
+    const mindMaps = mapDoc.exists ? [{ id: mapDoc.id, ...cloneData(mapDoc.data()) }] : [];
+    return { notes: [], mindMaps };
+  }
+
+  // 共同ルームには現在開いている親メモ（とその配下）だけを共有する。
+  // 他の個人メモを参加者に見せないため、全メモは渡さない。
+  const treeNotes = collectNoteSubtree(getSelectedRootNoteId());
+  const notes = cloneData(treeNotes);
+  const treeNoteIds = new Set(treeNotes.map(note => note.id));
+  const mapsSnap = await mindMapsCollection().get();
+  const mindMaps = mapsSnap.docs
+    .map(doc => ({ id: doc.id, ...cloneData(doc.data()) }))
+    .filter(map => map.source_note_id && treeNoteIds.has(map.source_note_id));
+  return { notes, mindMaps };
+}
+
+async function writeSeedCollection(collectionRef, items) {
+  const CHUNK = 450;
+  for (let i = 0; i < items.length; i += CHUNK) {
+    const batch = db.batch();
+    items.slice(i, i + CHUNK).forEach(item => batch.set(collectionRef.doc(item.id), item));
+    await batch.commit();
+  }
+}
+
+async function seedCollabRoom(roomRef, seed) {
+  if (seed.notes.length > 0) {
+    await writeSeedCollection(roomRef.collection("notes"), seed.notes);
+  }
+  if (seed.mindMaps.length > 0) {
+    await writeSeedCollection(roomRef.collection("mindmaps"), seed.mindMaps);
+  }
+}
+
+// ホストが共同作業を抜ける時、共有していたメモとマインドマップ（同期状態を
+// 含む）を個人メモ側へ書き戻す。これをしないと、共同作業中に張った
+// マインドマップとの同期が、個人メモへ戻った時点で失われてしまうため。
+async function harvestCollabRoomIntoPersonalWorkspace() {
+  if (state.collabRoomRole !== "host" || !isCollabActive()) return;
+  try {
+    const [notesSnap, mapsSnap] = await Promise.all([
+      notesCollection().get(),
+      mindMapsCollection().get(),
+    ]);
+    const notes = notesSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+    const mindMaps = mapsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+    const personalNotesRef = db.collection("users").doc(state.uid).collection("notes");
+    const personalMapsRef = db.collection("users").doc(state.uid).collection("mindmaps");
+    if (notes.length > 0) await writeSeedCollection(personalNotesRef, notes);
+    if (mindMaps.length > 0) await writeSeedCollection(personalMapsRef, mindMaps);
+  } catch (err) {
+    console.warn("[collab] 個人メモへの書き戻しに失敗しました", err);
+  }
+}
+
+function resetWorkspaceViewState() {
+  clearTimeout(state.saveTimer);
+  clearTimeout(state.mindMapSaveTimer);
+  state.selectedId = null;
+  state.expanded.clear();
+  state.unlockedNoteIds.clear();
+  state.undoStack = [];
+  state.data = { notes: [] };
+  setLargeEditorOpen(false);
+  resetMindMapState();
+  updateUndoButton();
+}
+
+async function reloadCurrentWorkspace() {
+  resetWorkspaceViewState();
+  await loadNotes();
+  startWorkspaceSnapshots();
+  updateCollabUI();
+  updateCollabStatusUI();
+  renderCollabCaretFlags();
+}
+
+async function joinCollabRoom(passphrase, requestedRole = state.collabJoinRole) {
+  const normalized = normalizeCollabPassphrase(passphrase);
+  const { hash, roomId: existingRoomId } = await collabRoomIdFromPassphrase(normalized);
+  const role = normalizeCollabRole(requestedRole);
+  if (existingRoomId && state.collabRoomId === existingRoomId) {
+    showToast("この合言葉の共同ルームに参加中です。");
+    return;
+  }
+
+  // マインドマップ単体（メモと同期していないもの）を開いている時にホストとして
+  // 開始した場合は、そのマインドマップ自体を共有対象にする。閉じる前に判定する。
+  const standaloneMindMapId = (!els.mindMapOverlay.hidden && state.mindMap
+    && !(state.mindMap.sync_enabled && state.mindMap.source_note_id))
+    ? state.mindMap.id
+    : null;
+
+  await saveCurrentEditorNow();
+  if (!els.mindMapOverlay.hidden) await closeMindMapPanel();
+  else if (state.mindMap) await saveMindMapNow();
+
+  const isNewRoom = !existingRoomId;
+  if (role === "guest" && isNewRoom) {
+    throw new Error("この合言葉の共同ルームはまだありません。ホストに作成してもらってください。");
+  }
+  if (role === "host" && isNewRoom && !state.selectedId && !standaloneMindMapId) {
+    throw new Error("共有したい親メモかマインドマップを開いてから、共同編集を開始してください。");
+  }
+
+  const seed = role === "host" ? await readCurrentWorkspaceSeed(standaloneMindMapId) : null;
+  const roomId = existingRoomId || generateRandomRoomId();
+  const roomRef = db.collection("collabRooms").doc(roomId);
+  const roomSnap = isNewRoom ? null : await roomRef.get();
+  const ts = nowIso();
+
+  const roomData = roomSnap?.exists ? (roomSnap.data() || {}) : {};
+  const currentHostUid = roomData.host_uid || roomData.created_by || null;
+  if (role === "host" && currentHostUid && currentHostUid !== state.uid) {
+    throw new Error("この合言葉は別のホストが使用中です。ゲストとして参加してください。");
+  }
+
+  if (role === "host") {
+    const roomUpdates = {
+      updated_at: ts,
+      host_uid: state.uid,
+      host_display_name: auth.currentUser?.displayName || "",
+    };
+    if (isNewRoom) Object.assign(roomUpdates, {
+      created_at: ts,
+      created_by: state.uid,
+      label_hint: normalized.slice(0, 40),
+    });
+    await roomRef.set(roomUpdates, { merge: true });
+    if (isNewRoom) {
+      await db.collection("passphraseIndex").doc(hash).set({
+        room_id: roomId,
+        created_at: ts,
+      });
+    }
+  }
+
+  const memberRef = roomRef.collection("members").doc(state.uid);
+  const existingMemberSnap = await memberRef.get();
+  // joined_at は「最初に参加した時刻」として、再参加時も上書きしない
+  // （退出時に先着順でホストを譲る判定に使うため）。
+  const joinedAt = existingMemberSnap.exists ? (existingMemberSnap.data()?.joined_at ?? ts) : ts;
+
+  await memberRef.set({
+    uid: state.uid,
+    role,
+    display_name: auth.currentUser?.displayName || "",
+    email: auth.currentUser?.email || "",
+    joined_at: joinedAt,
+    last_seen_at: ts,
+  }, { merge: true });
+  if (role === "host" && isNewRoom && seed) await seedCollabRoom(roomRef, seed);
+
+  stopWorkspaceSnapshots();
+  state.collabRoomId = roomId;
+  state.collabRoomLabel = normalized;
+  state.collabRoomRole = role;
+  saveCollabRoom(roomId, normalized, role);
+  await reloadCurrentWorkspace();
+  showToast(role === "host"
+    ? (isNewRoom ? "ホストとして共同ルームを作成しました。" : "ホストとして共同ルームに戻りました。")
+    : "ゲストとして共同ルームに参加しました。");
+
+  // 親メモが無い（マインドマップ単体を共有している）ルームでは、
+  // 空のメモ画面ではなくそのマインドマップを直接開く。
+  if (getNotes().length === 0) {
+    if (standaloneMindMapId) {
+      await openMindMapPanel();
+    } else {
+      const mapsSnap = await mindMapsCollection().get();
+      if (!mapsSnap.empty) await openMindMapPanel();
+    }
+  }
+}
+
+async function transferCollabHost(newHostUid) {
+  if (!state.collabRoomId || !newHostUid) return;
+  await db.collection("collabRooms").doc(state.collabRoomId).set({
+    host_uid: newHostUid,
+    updated_at: nowIso(),
+  }, { merge: true });
+}
+
+async function clearCollabHost() {
+  if (!state.collabRoomId) return;
+  await db.collection("collabRooms").doc(state.collabRoomId).set({
+    host_uid: null,
+    updated_at: nowIso(),
+  }, { merge: true });
+}
+
+// 「指定せずに退出」時、今オンラインの参加者の中で一番先にこのルームへ
+// 参加した人を次のホストにする。member.joined_at（初回参加時刻・再参加でも
+// 上書きされない）で比較する。
+async function pickEarliestJoinedCandidate() {
+  const candidateUids = [...new Set(state.collabPresence.map(p => p.uid))];
+  if (candidateUids.length === 0) return null;
+  if (candidateUids.length === 1) return candidateUids[0];
+
+  try {
+    const membersRef = db.collection("collabRooms").doc(state.collabRoomId).collection("members");
+    const snaps = await Promise.all(candidateUids.map(uid => membersRef.doc(uid).get()));
+    let earliestUid = null;
+    let earliestMs = Infinity;
+    snaps.forEach(snap => {
+      if (!snap.exists) return;
+      const ms = Date.parse(snap.data()?.joined_at || "");
+      if (Number.isFinite(ms) && ms < earliestMs) {
+        earliestMs = ms;
+        earliestUid = snap.id;
+      }
+    });
+    return earliestUid || candidateUids[0];
+  } catch {
+    return candidateUids[0];
+  }
+}
+
+// ── ホスト限定操作：退出せずにホストを譲る・ゲストを退出させる・
+//    ルームを終了する・合言葉を作り直す ──────────────────────────────
+
+async function requestTransferHostTo(member) {
+  if (state.collabRoomRole !== "host" || !member?.uid || member.uid === state.uid) return;
+  const name = presenceDisplayName(member);
+  const ok = await showConfirm(
+    `${name}さんをホストにしますか？あなたはゲストになります。`,
+    "ホストにする",
+  );
+  if (!ok) return;
+  try {
+    await transferCollabHost(member.uid);
+    showToast(`${name}さんをホストにしました。`);
+  } catch (err) {
+    showToast(translateCollabError(err, "ホストの引き継ぎに失敗しました。"));
+  }
+}
+
+async function requestKickMember(member) {
+  if (state.collabRoomRole !== "host" || !member?.uid || member.uid === state.uid) return;
+  const name = presenceDisplayName(member);
+  const ok = await showConfirm(`${name}さんを共同ルームから退出させますか？`, "退出させる");
+  if (!ok) return;
+  try {
+    const roomRef = db.collection("collabRooms").doc(state.collabRoomId);
+    await roomRef.collection("members").doc(member.uid).delete();
+    await roomRef.collection("presence").doc(member.uid).delete().catch(() => {});
+    showToast(`${name}さんを退出させました。`);
+  } catch (err) {
+    showToast(translateCollabError(err, "退出させる操作に失敗しました。"));
+  }
+}
+
+async function requestEndCollabRoom() {
+  if (state.collabRoomRole !== "host" || !state.collabRoomId) return;
+  const ok = await showConfirm(
+    "共同ルームを終了しますか？参加者全員が個人メモに戻ります。",
+    "終了する",
+  );
+  if (!ok) return;
+  try {
+    const roomRef = db.collection("collabRooms").doc(state.collabRoomId);
+    await roomRef.set({ ended_at: nowIso() }, { merge: true });
+    const membersSnap = await roomRef.collection("members").get();
+    const batch = db.batch();
+    membersSnap.docs.forEach(doc => {
+      if (doc.id !== state.uid) batch.delete(doc.ref);
+    });
+    await batch.commit();
+    await leaveCollabRoom(null);
+  } catch (err) {
+    showToast(translateCollabError(err, "共同ルームの終了に失敗しました。"));
+  }
+}
+
+async function requestRegenerateCollabPassphrase() {
+  if (state.collabRoomRole !== "host" || !state.collabRoomId) return;
+  const ok = await showConfirm(
+    "合言葉を作り直しますか？今の参加者はそのまま残ります。古い合言葉では新しく参加できなくなります。",
+    "作り直す",
+  );
+  if (!ok) return;
+  try {
+    const roomId = state.collabRoomId;
+    const oldHash = await sha256Hex(`${COLLAB_HASH_PREFIX}${normalizeCollabPassphrase(state.collabRoomLabel)}`);
+
+    // 4桁は最大10000通りしかないため、既に使われているコードと衝突しないか確認する
+    let newCode = null;
+    let newHash = null;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const candidateCode = generateCollabCode();
+      const candidateHash = await sha256Hex(`${COLLAB_HASH_PREFIX}${candidateCode}`);
+      const candidateSnap = await db.collection("passphraseIndex").doc(candidateHash).get();
+      if (!candidateSnap.exists) {
+        newCode = candidateCode;
+        newHash = candidateHash;
+        break;
+      }
+    }
+    if (!newCode) {
+      showToast("新しい合言葉の作成に失敗しました。もう一度お試しください。");
+      return;
+    }
+
+    // 中身（メモ・マインドマップ・参加者）は同じルームのまま、
+    // 合言葉のポインタだけを新しく作って古い方を消す。
+    await db.collection("passphraseIndex").doc(newHash).set({
+      room_id: roomId,
+      created_at: nowIso(),
+    });
+    await db.collection("passphraseIndex").doc(oldHash).delete().catch(() => {});
+    await db.collection("collabRooms").doc(roomId).set({
+      label_hint: newCode,
+      updated_at: nowIso(),
+    }, { merge: true });
+
+    state.collabRoomLabel = newCode;
+    saveCollabRoom(roomId, newCode, "host");
+    updateCollabUI();
+    renderCollabStatusPanel();
+    showToast(`合言葉を作り直しました。新しい合言葉: ${newCode}`);
+  } catch (err) {
+    showToast(translateCollabError(err, "合言葉の作り直しに失敗しました。"));
+  }
+}
+
+async function requestToggleGuestsReadOnly() {
+  if (state.collabRoomRole !== "host" || !state.collabRoomId) return;
+  const next = !state.collabGuestsReadOnly;
+  try {
+    await db.collection("collabRooms").doc(state.collabRoomId).set({
+      guests_read_only: next,
+      updated_at: nowIso(),
+    }, { merge: true });
+    state.collabGuestsReadOnly = next;
+    showToast(next ? "ゲストを閲覧専用にしました。" : "ゲストの編集を許可しました。");
+    renderCollabStatusPanel();
+    renderEditor();
+    if (state.mindMap && !els.mindMapOverlay?.hidden) renderMindMap();
+  } catch (err) {
+    showToast(translateCollabError(err, "設定の変更に失敗しました。"));
+  }
+}
+
+async function leaveCollabRoom(newHostUid = null) {
+  if (!isCollabActive()) return;
+  if (state.collabRoomRole === "host") {
+    if (newHostUid) await transferCollabHost(newHostUid);
+    else await clearCollabHost();
+  }
+  await saveCurrentEditorNow();
+  if (!els.mindMapOverlay.hidden) await closeMindMapPanel();
+  else if (state.mindMap) await saveMindMapNow();
+  await harvestCollabRoomIntoPersonalWorkspace();
+  await clearCollabPresence();
+  stopWorkspaceSnapshots();
+  clearSavedCollabRoom();
+  state.collabRoomId = null;
+  state.collabRoomLabel = "";
+  state.collabRoomRole = null;
+  await reloadCurrentWorkspace();
+  showToast("個人メモへ戻りました。");
+}
+
+function openHostTransferDialog() {
+  if (!els.hostTransferOverlay || !els.hostTransferList) return;
+  els.hostTransferList.innerHTML = "";
+  state.collabPresence.forEach(presence => {
+    const li = document.createElement("li");
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "host-transfer-candidate";
+
+    const avatar = document.createElement("span");
+    avatar.className = "collab-presence-avatar";
+    avatar.textContent = presenceInitials(presence);
+
+    const info = document.createElement("span");
+    info.className = "host-transfer-candidate-info";
+    const name = document.createElement("span");
+    name.className = "host-transfer-candidate-name";
+    name.textContent = presenceDisplayName(presence);
+    const meta = document.createElement("span");
+    meta.className = "host-transfer-candidate-meta";
+    meta.textContent = collabRoleLabel(presence.role);
+    info.append(name, meta);
+
+    btn.append(avatar, info);
+    btn.addEventListener("click", () => {
+      closeHostTransferDialog();
+      leaveCollabRoomFlow(presence.uid);
+    });
+    li.appendChild(btn);
+    els.hostTransferList.appendChild(li);
+  });
+  els.hostTransferOverlay.hidden = false;
+}
+
+function closeHostTransferDialog() {
+  if (els.hostTransferOverlay) els.hostTransferOverlay.hidden = true;
+}
+
+async function leaveCollabRoomFlow(newHostUid = null) {
+  try {
+    await leaveCollabRoom(newHostUid);
+  } catch (err) {
+    showToast(translateCollabError(err, "個人メモへ戻れませんでした。"));
+  }
+}
+
+// ホストが退出する時、他に参加者がいれば先に引き継ぎ先を選んでもらう。
+function confirmLeaveCollabRoom() {
+  if (state.collabRoomRole === "host" && state.collabPresence.length > 0) {
+    openHostTransferDialog();
+    return;
+  }
+  return leaveCollabRoomFlow(null);
+}
+
+async function restoreSavedCollabRoom(uid) {
+  const saved = getSavedCollabRoom(uid);
+  if (!saved) return false;
+  state.collabRoomId = saved.roomId;
+  state.collabRoomLabel = saved.label || "共同ルーム";
+  state.collabRoomRole = saved.role || "guest";
+  return true;
+}
+
+async function loadSignedInWorkspace(user) {
+  const changedUser = state.uid !== user.uid;
+  if (changedUser) {
+    void clearCollabPresence();
+    stopWorkspaceSnapshots();
+    state.unlockedNoteIds.clear();
+    state.collabRoomId = null;
+    state.collabRoomLabel = "";
+    state.collabRoomRole = null;
+    resetMindMapState();
+  }
+  state.uid = user.uid;
+  await restoreSavedCollabRoom(user.uid);
+  [state.templates, state.mindMapTemplates] = await Promise.all([
+    ensureOfficialTemplates(user.uid),
+    ensureOfficialMindMapTemplates(user.uid),
+  ]);
+  await reloadCurrentWorkspace();
+}
+
 function openAppManagement(anchor) {
   closeMemoSettingsPanel();
   closeMemoFormatPanel();
@@ -864,6 +2349,7 @@ function openAppManagement(anchor) {
   els.appManagementOverlay.hidden = false;
   document.body.classList.add("has-management-open");
   els.appManageBtn?.setAttribute("aria-expanded", String(anchor === els.appManageBtn));
+  els.memoCollabBtn?.setAttribute("aria-expanded", String(anchor === els.memoCollabBtn));
   els.mindMapManageBtn?.setAttribute("aria-expanded", String(anchor === els.mindMapManageBtn));
   els.accountBtn?.setAttribute("aria-expanded", String(anchor === els.accountBtn));
   els.mindMapAccountBtn?.setAttribute("aria-expanded", String(anchor === els.mindMapAccountBtn));
@@ -876,6 +2362,7 @@ function closeAppManagement() {
   showAppManagementHome();
   document.body.classList.remove("has-management-open");
   els.appManageBtn?.setAttribute("aria-expanded", "false");
+  els.memoCollabBtn?.setAttribute("aria-expanded", "false");
   els.mindMapManageBtn?.setAttribute("aria-expanded", "false");
   els.accountBtn?.setAttribute("aria-expanded", "false");
   els.mindMapAccountBtn?.setAttribute("aria-expanded", "false");
@@ -893,6 +2380,90 @@ els.appHowToClose?.addEventListener("click", closeAppManagement);
 els.appNoteHowToTab?.addEventListener("click", () => showAppHowToView("memo", true));
 els.appMindMapHowToTab?.addEventListener("click", () => showAppHowToView("mindmap", true));
 els.appDataInfoBtn?.addEventListener("click", () => openAppInfo("data"));
+els.memoCollabBtn?.addEventListener("click", () => openAppCollabFromAnchor(els.memoCollabBtn));
+els.appCollabBtn?.addEventListener("click", openAppCollab);
+els.appCollabBack?.addEventListener("click", () => showAppManagementHome(true));
+els.appCollabClose?.addEventListener("click", closeAppManagement);
+els.appCollabHostBtn?.addEventListener("click", () => setCollabJoinRole("host"));
+els.appCollabGuestBtn?.addEventListener("click", () => setCollabJoinRole("guest"));
+els.appCollabRegenerateBtn?.addEventListener("click", () => {
+  if (!els.appCollabPassphrase) return;
+  els.appCollabPassphrase.value = generateCollabCode();
+  showCollabPassphrase(true);
+  els.appCollabPassphrase.focus();
+});
+els.appCollabShowPassphrase?.addEventListener("change", () => {
+  if (els.appCollabPassphrase) {
+    els.appCollabPassphrase.type = els.appCollabShowPassphrase.checked ? "text" : "password";
+  }
+});
+els.appCollabForm?.addEventListener("submit", async e => {
+  e.preventDefault();
+  setCollabError("");
+  setCollabBusy(true);
+  try {
+    await joinCollabRoom(els.appCollabPassphrase?.value || "", state.collabJoinRole);
+    updateCollabUI();
+    if (els.appCollabPassphrase) els.appCollabPassphrase.value = "";
+  } catch (err) {
+    setCollabError(translateCollabError(err));
+  } finally {
+    setCollabBusy(false);
+  }
+});
+els.appCollabLeaveBtn?.addEventListener("click", async () => {
+  setCollabError("");
+  setCollabBusy(true);
+  try {
+    await confirmLeaveCollabRoom();
+    updateCollabUI();
+  } catch (err) {
+    setCollabError(translateCollabError(err, "個人メモへ戻れませんでした。"));
+  } finally {
+    setCollabBusy(false);
+  }
+});
+els.collabStatusBtn?.addEventListener("click", () => toggleCollabStatusPanel(els.collabStatusBtn));
+els.mindMapCollabStatusBtn?.addEventListener("click", () => toggleCollabStatusPanel(els.mindMapCollabStatusBtn));
+els.collabStatusClose?.addEventListener("click", closeCollabStatusPanel);
+els.collabStatusSettingsBtn?.addEventListener("click", () => {
+  const inMindMap = !els.mindMapOverlay?.hidden;
+  closeCollabStatusPanel();
+  openAppCollabFromAnchor(inMindMap ? els.mindMapManageBtn : els.appManageBtn);
+});
+els.collabStatusLeaveBtn?.addEventListener("click", async () => {
+  els.collabStatusLeaveBtn.disabled = true;
+  try {
+    closeCollabStatusPanel();
+    await confirmLeaveCollabRoom();
+  } catch (err) {
+    showToast(translateCollabError(err, "個人メモへ戻れませんでした。"));
+  } finally {
+    if (els.collabStatusLeaveBtn) els.collabStatusLeaveBtn.disabled = false;
+  }
+});
+els.collabStatusHostMenuBtn?.addEventListener("click", () => {
+  setCollabStatusHostMenuOpen(Boolean(els.collabStatusHostMenu?.hidden));
+});
+els.collabStatusReadOnlyBtn?.addEventListener("click", requestToggleGuestsReadOnly);
+els.collabStatusRegenerateBtn?.addEventListener("click", () => {
+  closeCollabStatusPanel();
+  requestRegenerateCollabPassphrase();
+});
+els.collabStatusEndRoomBtn?.addEventListener("click", () => {
+  closeCollabStatusPanel();
+  requestEndCollabRoom();
+});
+els.hostTransferSkipBtn?.addEventListener("click", async () => {
+  closeHostTransferDialog();
+  const nextHostUid = await pickEarliestJoinedCandidate();
+  leaveCollabRoomFlow(nextHostUid);
+});
+els.hostTransferCancelBtn?.addEventListener("click", closeHostTransferDialog);
+els.hostTransferOverlay?.addEventListener("click", e => {
+  if (e.target === els.hostTransferOverlay) closeHostTransferDialog();
+});
+
 els.appAccountBtn?.addEventListener("click", openAppAccount);
 els.appAccountBack?.addEventListener("click", () => showAppManagementHome(true));
 els.appAccountClose?.addEventListener("click", closeAppManagement);
@@ -1156,8 +2727,73 @@ function nowSortableIso() {
   return new Date().toISOString();
 }
 
+function isCollabActive() {
+  return Boolean(state.collabRoomId);
+}
+
+// 共同ルームは親メモ1件だけを共有する設計のため、共同作業中は新しい
+// 親メモを追加できないようにする。ブロックした場合はtrueを返す。
+function blockNewRootMemoInCollab() {
+  if (!isCollabActive()) return false;
+  showToast("共同作業中は新しい親メモを追加できません。");
+  return true;
+}
+
+// 共同ルームは1つのマインドマップ（共有中の親メモと同期したもの）だけを
+// 扱う設計のため、共同作業中は無関係な新規マインドマップを追加できないようにする。
+function blockNewMindMapInCollab() {
+  if (!isCollabActive()) return false;
+  showToast("共同作業中は新しいマインドマップを追加できません。");
+  return true;
+}
+
+// 親メモ（共有ルート）の名前はホストだけが変更できる。子メモは誰でも変更できる。
+function canEditNoteTitle(note) {
+  if (!isCollabActive() || !note) return true;
+  if (note.parent_id !== null) return true;
+  return state.collabRoomRole === "host";
+}
+
+// マインドマップ自体の名前は、親メモの名前と同様に共同作業中はホストだけが変更できる。
+// ノードのタイトル・メモは誰でも編集できる（子メモと同じ扱い）。
+function canEditMindMapTitle() {
+  if (!isCollabActive()) return true;
+  return state.collabRoomRole === "host";
+}
+
+function blockRootRenameForGuest(note) {
+  if (canEditNoteTitle(note)) return false;
+  showToast("共同作業中、親メモの名前を変更できるのはホストだけです。");
+  return true;
+}
+
+// マインドマップとの同期（どちらの方向でも）は共同作業中はホストだけができる。
+function blockMindMapSyncForGuest() {
+  if (!isCollabActive() || state.collabRoomRole === "host") return false;
+  showToast("共同作業中、マインドマップとの同期はホストだけができます。");
+  return true;
+}
+
+// ホストが「ゲストを閲覧専用」にしている間、ゲスト側の編集操作を止める。
+function isGuestReadOnly() {
+  return isCollabActive() && state.collabRoomRole === "guest" && state.collabGuestsReadOnly;
+}
+
+function blockIfGuestReadOnly() {
+  if (!isGuestReadOnly()) return false;
+  showToast("ホストが閲覧専用に設定しているため編集できません。");
+  return true;
+}
+
+function currentWorkspaceRootRef() {
+  if (isCollabActive()) {
+    return db.collection("collabRooms").doc(state.collabRoomId);
+  }
+  return db.collection("users").doc(state.uid);
+}
+
 function notesCollection() {
-  return db.collection("users").doc(state.uid).collection("notes");
+  return currentWorkspaceRootRef().collection("notes");
 }
 
 function templatesCollection() {
@@ -1169,7 +2805,12 @@ function mindMapTemplatesCollection() {
 }
 
 function mindMapsCollection() {
-  return db.collection("users").doc(state.uid).collection("mindmaps");
+  return currentWorkspaceRootRef().collection("mindmaps");
+}
+
+function mediaStoragePrefix() {
+  if (isCollabActive()) return `collabRooms/${state.collabRoomId}/media`;
+  return `users/${state.uid}/media`;
 }
 
 // ── 階層・並び順ヘルパー ─────────────────────────────────────────────────────────
@@ -1659,6 +3300,13 @@ async function convertSelectedNoteToMindMap(noteId = state.selectedId) {
       showToast("変換するメモを選択してください。");
       return;
     }
+    // 共同作業中は、共有中の親メモ（ルート）に対する同期だけ許可する。
+    // 子メモを同期すると新しい独立ツリーが作られてしまうため。
+    if (isCollabActive() && selected.parent_id !== null) {
+      showToast("共同作業中は、共有中の親メモ以外はマインドマップと同期できません。");
+      return;
+    }
+    if (blockMindMapSyncForGuest()) return;
 
     await saveCurrentEditorNow();
     if (state.mindMap) await saveMindMapNow();
@@ -1705,6 +3353,7 @@ async function convertSelectedNoteToMindMap(noteId = state.selectedId) {
 
 async function convertCurrentMindMapToNotes(rootNodeId = null) {
   if (isMindMapPresentationMode()) return;
+  if (blockMindMapSyncForGuest()) return;
   try {
     if (!state.mindMap) {
       showToast("変換するマインドマップがありません。");
@@ -1725,11 +3374,14 @@ async function convertCurrentMindMapToNotes(rootNodeId = null) {
     const isDifferentLinkedSubtree = Boolean(
       rootNodeId && state.mindMap.sync_enabled && state.mindMap.source_node_id !== root.id
     );
+    const isFirstTimeSync = !state.mindMap.sync_enabled || !state.mindMap.source_note_id;
+    if ((isDifferentLinkedSubtree || isFirstTimeSync) && blockNewRootMemoInCollab()) return;
+
     if (isDifferentLinkedSubtree) {
       const tree = buildNoteTreeFromMindMapNode(root);
       const created = createNotesFromTemplate(tree, null, nextOrderForNewNote(null));
       await writeNotesBatch(created);
-      state.data.notes.push(...created);
+      appendNotesIfMissing(created);
       await closeMindMapPanel();
       selectNote(created[0].id);
       showToast("選択したノードを独立したメモに変換しました。");
@@ -1838,6 +3490,19 @@ function pruneOrphanedMedia(note, newContent) {
 
 function getNotes()        { return state.data?.notes ?? []; }
 function getSelectedNote() { return getNotes().find(n => n.id === state.selectedId) ?? null; }
+
+// Firestoreへ書き込んだ直後にローカルへも反映するためのヘルパー。
+// 共同編集中はnotesCollection()のonSnapshotが同じ書き込みを検知して
+// 先にstate.data.notesへ反映してしまうことがあるため、そのまま push すると
+// 同じメモが二重に入ってしまう。既にあるIDは追加しないことで二重生成を防ぐ。
+function appendNotesIfMissing(notes) {
+  const existingIds = new Set(getNotes().map(n => n.id));
+  notes.forEach(note => {
+    if (existingIds.has(note.id)) return;
+    state.data.notes.push(note);
+    existingIds.add(note.id);
+  });
+}
 function getChildren(pid) {
   return getNotes()
     .filter(n => n.parent_id === pid)
@@ -1874,6 +3539,11 @@ function isLockableParentNote(note) {
 
 function isNoteInSubtree(noteId, parentId) {
   return getNoteAncestorChain(noteId).some(note => note.id === parentId);
+}
+
+function collectNoteSubtree(rootId) {
+  if (!rootId) return [];
+  return getNotes().filter(note => isNoteInSubtree(note.id, rootId));
 }
 
 async function ensureNoteAccess(noteId) {
@@ -1914,6 +3584,7 @@ function clearUnlockedNoteSubtree(parentId) {
 }
 
 async function toggleNoteLock(noteId) {
+  if (blockIfGuestReadOnly()) return;
   const note = getNotes().find(item => item.id === noteId);
   if (!note || (!note.locked && !isLockableParentNote(note))) {
     showToast("鍵を設定できるのは親メモです。");
@@ -2093,6 +3764,7 @@ function normalizeTreeDropTarget(noteId, parentId, beforeId, options = {}) {
 
 async function moveNoteToTreePosition(noteId, parentId, beforeId, options = {}) {
   if (!noteId) return;
+  if (blockIfGuestReadOnly()) return;
   if (!await ensureNoteAccess(noteId)) return;
   if (parentId && !await ensureNoteAccess(parentId)) return;
   const target = normalizeTreeDropTarget(noteId, parentId, beforeId, options);
@@ -2100,6 +3772,7 @@ async function moveNoteToTreePosition(noteId, parentId, beforeId, options = {}) 
 
   const moving = getNotes().find(n => n.id === noteId);
   const parentChanged = moving?.parent_id !== target.parentId;
+  if (target.parentId === null && parentChanged && blockNewRootMemoInCollab()) return;
   const wasSelected = state.selectedId === noteId;
 
   try {
@@ -2621,7 +4294,7 @@ async function restoreDeletedNotes(snapshot) {
       batch.set(ref.doc(note.id), note);
     }
     await batch.commit();
-    state.data.notes.push(...cloneData(snapshot.notes));
+    appendNotesIfMissing(cloneData(snapshot.notes));
     const restoredRoot = state.data.notes.find(note => note.id === snapshot.noteId);
     if (restoredRoot?.linked_mindmap_id) {
       const mapId = restoredRoot.linked_mindmap_id;
@@ -3231,7 +4904,11 @@ function renderNoteList() {
     renameBtn.type = "button";
     renameBtn.className = "mindmap-list-icon-btn";
     renameBtn.dataset.action = "rename";
-    renameBtn.title = "名前を変更";
+    const renameBlocked = !canEditNoteTitle(note);
+    renameBtn.disabled = renameBlocked;
+    renameBtn.title = renameBlocked
+      ? "共同作業中、親メモの名前を変更できるのはホストだけです"
+      : "名前を変更";
     renameBtn.setAttribute("aria-label", `「${note.title || "無題"}」の名前を変更`);
     renameBtn.textContent = "✏️";
     actions.appendChild(renameBtn);
@@ -3243,6 +4920,7 @@ function renderNoteList() {
     deleteBtn.title = "削除";
     deleteBtn.setAttribute("aria-label", `「${note.title || "無題"}」を削除`);
     deleteBtn.textContent = "🗑";
+    deleteBtn.hidden = isCollabActive();
     actions.appendChild(deleteBtn);
 
     item.appendChild(actions);
@@ -3288,6 +4966,7 @@ async function startNoteListRename(noteId) {
   const note = getNotes().find(item => item.id === noteId);
   const item = els.noteListItems?.querySelector(`[data-id="${noteId}"]`);
   if (!note || !item || item.classList.contains("is-editing")) return;
+  if (blockRootRenameForGuest(note)) return;
   if (!await ensureNoteAccess(noteId)) return;
   const openBtn = item.querySelector(".mindmap-list-open");
 
@@ -3354,12 +5033,14 @@ function renderNode(note, treeCtx) {
   const expanded  = !lockedClosed && (state.expanded.has(note.id) || treeCtx.hasQuery);
   const descCount = treeCtx.descendantCount(note.id);
   const syncDisplayMapId = getNoteSyncDisplayMapId(note);
+  const editingPresences = getPresenceForNote(note.id, { editingOnly: true });
 
   const wrapper = document.createElement("div");
   wrapper.className = "tree-node";
 
   const row = document.createElement("button");
   row.className  = `tree-row${note.id === state.selectedId ? " active" : ""}${note.pinned ? " pinned" : ""}${note.checked ? " checked" : ""}${note.locked ? " locked" : ""}${lockedClosed ? " locked-closed" : ""}`;
+  row.classList.toggle("has-collab-presence", editingPresences.length > 0);
   row.draggable  = !lockedClosed;
   row.dataset.id = note.id;
   if (syncDisplayMapId) applySyncPairStyle(row, syncDisplayMapId);
@@ -3415,6 +5096,10 @@ function renderNode(note, treeCtx) {
     badge.className   = "tree-count-badge";
     badge.textContent = descCount;
     row.appendChild(badge);
+  }
+
+  if (editingPresences.length > 0) {
+    row.appendChild(createTreePresenceBadge(editingPresences));
   }
 
   const addBtn = document.createElement("span");
@@ -3532,6 +5217,7 @@ function renderEditor() {
     els.breadcrumb.textContent   = emptyMessage;
     els.selectedInfo.textContent = "";
     applySyncPairStyle(els.selectedInfo, null, false);
+    renderCollabCaretFlags();
     els.checkBtn.disabled = true;
     els.checkBtn.classList.remove("active");
     els.checkBtn.title = "チェックを付ける";
@@ -3547,20 +5233,35 @@ function renderEditor() {
     updateUndoButton();
     return;
   }
-  els.checkBtn.disabled = false;
+  const readOnly = isGuestReadOnly();
+  els.checkBtn.disabled = readOnly;
   els.largeEditorBtn.disabled = false;
-  els.mediaBtn.disabled = false;
-  els.deleteBtn.disabled = false;
+  els.mediaBtn.disabled = readOnly;
+  const isRootNote = note.parent_id === null;
+  els.deleteBtn.disabled = (isCollabActive() && isRootNote) || readOnly;
+  els.deleteBtn.title = isCollabActive() && isRootNote
+    ? "共同作業中は親メモを削除できません"
+    : readOnly ? "ホストが閲覧専用に設定しています" : "選択中のメモを削除";
   els.checkBtn.classList.toggle("active", Boolean(note.checked));
   els.checkBtn.title = note.checked ? "チェックを外す" : "チェックを付ける";
   setButtonContent(els.checkBtn, "✓");
-  if (els.noteToMindMapBtn) els.noteToMindMapBtn.disabled = false;
-  setMemoFormatEnabled(true);
+  if (els.noteToMindMapBtn) {
+    const syncBlockedForGuest = isCollabActive() && state.collabRoomRole !== "host";
+    els.noteToMindMapBtn.disabled = readOnly || syncBlockedForGuest;
+    els.noteToMindMapBtn.title = syncBlockedForGuest
+      ? "共同作業中、マインドマップとの同期はホストだけができます"
+      : "選択中のメモをマインドマップと同期";
+  }
+  setMemoFormatEnabled(!readOnly);
   setMemoFormatUi({ color: MEMO_DEFAULT_TEXT_COLOR, strike: false, headingLevel: "normal" });
   els.contentInput.dataset.placeholder = "ここにメモを書いてください";
-  els.contentInput.contentEditable = "true";
+  els.contentInput.contentEditable = readOnly ? "false" : "true";
   els.titleInput.placeholder = "タイトル";
-  els.titleInput.readOnly = false;
+  const titleEditable = canEditNoteTitle(note) && !readOnly;
+  els.titleInput.readOnly = !titleEditable;
+  els.titleInput.title = titleEditable
+    ? ""
+    : readOnly ? "ホストが閲覧専用に設定しています" : "共同作業中、親メモの名前を変更できるのはホストだけです";
   els.titleInput.value = note.title;
 
   let html = contentToHtml(note.content);
@@ -3588,7 +5289,8 @@ function renderEditor() {
   const sync = syncStyle ? ` / ${syncStyle.label}でマインドマップと同期中` : "";
   els.selectedInfo.textContent = `作成: ${note.created_at} / 更新: ${note.updated_at}${src}${sync}`;
   applySyncPairStyle(els.selectedInfo, syncDisplayMapId, Boolean(syncDisplayMapId));
-  els.saveStatus.textContent   = "保存済み";
+  renderCollabCaretFlags();
+  els.saveStatus.textContent   = readOnly ? "閲覧専用（ホストが編集を制限中）" : "保存済み";
   updateEmptyState();
   updateUndoButton();
 }
@@ -3657,6 +5359,7 @@ function closeNoteAiPanel() {
 }
 
 async function generateNoteWithAI() {
+  if (blockNewRootMemoInCollab()) return;
   const btn   = els.noteAiGenerateBtn;
   const errEl = els.noteAiError;
   const requestData = prepareAiRequest(els.noteAiPrompt, els.noteAiFile, errEl);
@@ -3674,7 +5377,7 @@ async function generateNoteWithAI() {
     closeNoteAiPanel();
     const created = createNotesFromTemplate(tree, null, nextOrderForNewNote(null));
     await writeNotesBatch(created);
-    state.data.notes.push(...created);
+    appendNotesIfMissing(created);
     created.forEach(note => {
       if (created.some(child => child.parent_id === note.id)) state.expanded.add(note.id);
     });
@@ -3701,6 +5404,7 @@ function selectNote(id) {
   renderTree();
   renderEditor();
   closeMobileMenu();
+  setCollabPresence("viewing", { immediate: true });
 }
 
 async function saveCurrentEditorNow() {
@@ -3740,7 +5444,9 @@ async function loadNotes() {
 
 async function createNote(parentId) {
   try {
+    if (blockIfGuestReadOnly()) return;
     const pid = parentId ?? null;
+    if (pid === null && blockNewRootMemoInCollab()) return;
     if (pid && !await ensureNoteAccess(pid)) return;
     const ts  = nowIso();
     const note = {
@@ -3759,7 +5465,7 @@ async function createNote(parentId) {
       order:       nextOrderForNewNote(pid),
     };
     await notesCollection().doc(note.id).set(note);
-    state.data.notes.push(note);
+    appendNotesIfMissing([note]);
     if (pid) await syncLinkedMindMapForNote(note);
     if (parentId) state.expanded.add(parentId);
     selectNote(note.id);
@@ -3898,6 +5604,7 @@ async function togglePinnedNote(noteId) {
 }
 
 async function toggleCheckedNote(noteId) {
+  if (blockIfGuestReadOnly()) return;
   const note = getNotes().find(n => n.id === noteId);
   if (!note) return;
   if (!await ensureNoteAccess(noteId)) return;
@@ -3943,6 +5650,11 @@ function scheduleSave() {
 async function deleteSelectedNote() {
   const note = getSelectedNote();
   if (!note) return;
+  if (isCollabActive() && note.parent_id === null) {
+    showToast("共同作業中は親メモを削除できません。");
+    return;
+  }
+  if (blockIfGuestReadOnly()) return;
   if (!await ensureNoteAccess(note.id)) return;
   const initialSnapshot = snapshotDeletedNotes(note.id);
   const initialDeleteIds = new Set(initialSnapshot.notes.map(item => item.id));
@@ -4342,6 +6054,7 @@ function closeMindMapAiPanel() {
 }
 
 async function generateMindMapWithAI() {
+  if (blockNewMindMapInCollab()) return;
   const btn = els.mindMapAiGenerateBtn;
   const errEl = els.mindMapAiError;
   const requestData = prepareAiRequest(els.mindMapAiPrompt, els.mindMapAiFile, errEl);
@@ -4444,6 +6157,7 @@ async function saveMindMapAsTemplate() {
 
 async function applyMindMapTemplate(templateId) {
   if (isMindMapPresentationMode()) return;
+  if (blockNewMindMapInCollab()) return;
   const template = state.mindMapTemplates.find(t => t.id === templateId);
   if (!template) return;
   if (state.mindMap) await saveMindMapNow();
@@ -4576,6 +6290,7 @@ function startTemplateRename(item, templateId) {
 
 async function applyTemplate(templateId) {
   try {
+    if (blockNewRootMemoInCollab()) return;
     const template = state.templates.find(t => t.id === templateId);
     if (!template) throw new Error("テンプレートが見つかりません。");
 
@@ -4588,7 +6303,7 @@ async function applyTemplate(templateId) {
     await batch.commit();
 
     closeTemplatesPanel();
-    state.data.notes.push(...created);
+    appendNotesIfMissing(created);
     selectNote(created[0].id);
     showToast("テンプレートを親メモとして追加しました。");
   } catch (e) { showToast(e.message); }
@@ -4784,7 +6499,9 @@ function getMindMapNodes() {
 }
 
 function isMindMapPresentationMode() {
-  return Boolean(state.mindMapPresentationMode);
+  // ゲストが閲覧専用に設定されている間は、発表モードと同じ「編集不可」
+  // 扱いにする（既存の発表モード用ガードをそのまま流用するため）。
+  return Boolean(state.mindMapPresentationMode) || isGuestReadOnly();
 }
 
 function getMindMapNode(id) {
@@ -5484,6 +7201,30 @@ function setMindMapNodeButtonContent(button, node) {
     dot.title = "メモあり";
     button.appendChild(dot);
   }
+
+  const editingPresences = getPresenceForMindMapNode(node.id, { editingOnly: true });
+  if (editingPresences.length > 0) {
+    button.appendChild(createMindMapPresenceBadge(editingPresences));
+  }
+}
+
+// ノードをドラッグ中・インライン編集中でも、他の参加者がどのノードを
+// 編集しているかバッジだけは常に最新化する（タイトルやレイアウトは触らない）。
+function refreshMindMapNodePresenceBadges() {
+  if (!state.mindMap || els.mindMapOverlay?.hidden || !els.mindMapNodes) return;
+  els.mindMapNodes.querySelectorAll(".mindmap-node[data-id]").forEach(button => {
+    const nodeId = button.dataset.id;
+    if (nodeId === state.mindMapInlineEditNodeId) return;
+    const existingBadge = button.querySelector(".mindmap-node-presence");
+    const editingPresences = getPresenceForMindMapNode(nodeId, { editingOnly: true });
+    if (editingPresences.length > 0) {
+      const badge = createMindMapPresenceBadge(editingPresences);
+      if (existingBadge) existingBadge.replaceWith(badge);
+      else button.appendChild(badge);
+    } else if (existingBadge) {
+      existingBadge.remove();
+    }
+  });
 }
 
 function renderMindMap() {
@@ -5504,9 +7245,15 @@ function renderMindMap() {
     state.mindMap.id,
     Boolean(state.mindMap.sync_enabled && state.mindMap.source_note_id),
   );
+  renderMindMapPresencePanel();
 
   els.mindMapTitleInput.value = state.mindMap.title || "";
+  const mindMapTitleEditable = canEditMindMapTitle();
   els.mindMapTitleInput.disabled = presentationMode;
+  els.mindMapTitleInput.readOnly = !mindMapTitleEditable;
+  els.mindMapTitleInput.title = mindMapTitleEditable
+    ? ""
+    : "共同作業中、マインドマップの名前を変更できるのはホストだけです";
   els.mindMapNodeTitleInput.value = selected?.title ?? "";
   els.mindMapNodeTitleInput.disabled = !selected || presentationMode;
   if (els.mindMapNodeMemoInput) {
@@ -5519,11 +7266,29 @@ function renderMindMap() {
   if (els.mindMapAlignChildrenBtn) els.mindMapAlignChildrenBtn.disabled = presentationMode || !canAlignMindMapChildren(alignTarget.parent);
   const rootCount = getMindMapNodes().filter(n => n.parent_id === null).length;
   if (els.mindMapDeleteNodeBtn) els.mindMapDeleteNodeBtn.disabled = presentationMode || !selected || (selected.parent_id === null && rootCount <= 1);
-  if (els.mindMapToNoteBtn) els.mindMapToNoteBtn.disabled = presentationMode || visibleNodes.length === 0;
-  if (els.mindMapDeleteBtn) els.mindMapDeleteBtn.disabled = presentationMode || !state.mindMap;
+  const syncBlockedForGuest = isCollabActive() && state.collabRoomRole !== "host";
+  if (els.mindMapToNoteBtn) {
+    els.mindMapToNoteBtn.disabled = presentationMode || visibleNodes.length === 0 || syncBlockedForGuest;
+    els.mindMapToNoteBtn.title = syncBlockedForGuest
+      ? "共同作業中、マインドマップとの同期はホストだけができます"
+      : "現在のマインドマップをメモと同期";
+  }
+  if (els.mindMapDeleteBtn) {
+    els.mindMapDeleteBtn.disabled = presentationMode || !state.mindMap || isCollabActive();
+    els.mindMapDeleteBtn.title = isCollabActive()
+      ? "共同作業中はマインドマップを削除できません"
+      : "現在のマインドマップを削除";
+  }
   if (els.mindMapNodeSettingsBtn) els.mindMapNodeSettingsBtn.disabled = presentationMode || !selected;
-  if (els.mindMapNewBtn) els.mindMapNewBtn.disabled = presentationMode;
-  if (els.mindMapSideNewBtn) els.mindMapSideNewBtn.disabled = presentationMode;
+  const newMapBlockedByCollab = isCollabActive();
+  if (els.mindMapNewBtn) {
+    els.mindMapNewBtn.disabled = presentationMode || newMapBlockedByCollab;
+    els.mindMapNewBtn.title = newMapBlockedByCollab ? "共同作業中は新しいマインドマップを追加できません" : "新規マップ";
+  }
+  if (els.mindMapSideNewBtn) {
+    els.mindMapSideNewBtn.disabled = presentationMode || newMapBlockedByCollab;
+    els.mindMapSideNewBtn.title = newMapBlockedByCollab ? "共同作業中は新しいマインドマップを追加できません" : "新規マップ";
+  }
   if (els.mindMapTemplateBtn) els.mindMapTemplateBtn.disabled = presentationMode;
   updateMindMapUndoButton();
 
@@ -5795,6 +7560,7 @@ function selectMindMapNode(id) {
   if (!getMindMapNode(id)) return;
   state.mindMapSelectedId = id;
   renderMindMap();
+  setCollabPresence("mindmap");
   if (!isMindMapPresentationMode()) scheduleMindMapSave();
 }
 
@@ -5812,6 +7578,7 @@ function startMindMapNodeEdit(nodeId) {
   clearTimeout(state.mindMapSaveTimer);
   state.mindMapInlineEditNodeId = nodeId;
   els.mindMapStatus.textContent = "編集中...";
+  setCollabPresence("mindmap-node-title", { immediate: true });
 
   const input = document.createElement("input");
   input.type = "text";
@@ -5842,6 +7609,7 @@ function startMindMapNodeEdit(nodeId) {
     nodeBtn.classList.remove("is-editing");
     state.mindMapInlineEditNodeId = null;
     input.remove();
+    setCollabPresence("mindmap");
   };
   input.addEventListener("compositionstart", () => { isComposing = true; });
   input.addEventListener("compositionend", () => { isComposing = false; });
@@ -6336,6 +8104,7 @@ function formatListDate(iso) {
 
 async function createNewMindMap() {
   if (isMindMapPresentationMode()) return;
+  if (blockNewMindMapInCollab()) return;
   if (state.mindMap) await saveMindMapNow();
   const map = createDefaultMindMap();
   const previous = state.mindMap;
@@ -6410,6 +8179,12 @@ function removeMindMapFromStateAfterLinkedDelete(id) {
 
 async function deleteMindMap(id) {
   if (isMindMapPresentationMode()) return;
+  // 共同ルームは1つの共有コンテンツ（親メモやマインドマップ）を扱う設計のため、
+  // 共同作業中はどのマインドマップも削除できないようにする。
+  if (isCollabActive()) {
+    showToast("共同作業中はマインドマップを削除できません。");
+    return;
+  }
   let targetMap;
   try {
     targetMap = await getMindMapById(id);
@@ -6512,6 +8287,10 @@ async function renameMindMapAndSync(id, title) {
 
 function startMindMapListRename(id) {
   if (isMindMapPresentationMode()) return;
+  if (!canEditMindMapTitle()) {
+    showToast("共同作業中、マインドマップの名前を変更できるのはホストだけです。");
+    return;
+  }
   const item = els.mindMapListItems.querySelector(`[data-id="${id}"]`);
   const entry = state.mindMapList.find(m => m.id === id);
   if (!item || !entry || item.classList.contains("is-editing")) return;
@@ -6607,7 +8386,11 @@ function renderMindMapList() {
     renameBtn.type = "button";
     renameBtn.className = "mindmap-list-icon-btn";
     renameBtn.dataset.action = "rename";
-    renameBtn.title = "名前を変更";
+    const renameBlocked = !canEditMindMapTitle();
+    renameBtn.disabled = renameBlocked;
+    renameBtn.title = renameBlocked
+      ? "共同作業中、マインドマップの名前を変更できるのはホストだけです"
+      : "名前を変更";
     renameBtn.setAttribute("aria-label", "名前を変更");
     renameBtn.textContent = "✏️";
     actions.appendChild(renameBtn);
@@ -6616,10 +8399,10 @@ function renderMindMapList() {
     deleteBtn.type = "button";
     deleteBtn.className = "mindmap-list-icon-btn danger";
     deleteBtn.dataset.action = "delete";
-    deleteBtn.title = "削除";
+    deleteBtn.title = isCollabActive() ? "共同作業中はマインドマップを削除できません" : "削除";
     deleteBtn.setAttribute("aria-label", "削除");
     deleteBtn.textContent = "🗑";
-    deleteBtn.disabled = state.mindMapList.length <= 1;
+    deleteBtn.disabled = state.mindMapList.length <= 1 || isCollabActive();
     actions.appendChild(deleteBtn);
 
     item.appendChild(actions);
@@ -6779,6 +8562,7 @@ async function openMindMapPanel() {
   try {
     await loadMindMap();
     renderMindMap();
+    setCollabPresence("mindmap", { immediate: true });
     requestAnimationFrame(() => {
       if (!state.mindMapCentered) centerMindMap();
       else applyMindMapTransform();
@@ -6803,6 +8587,7 @@ async function closeMindMapPanel() {
   if (state.mindMap) await saveMindMapNow();
   renderTree();
   renderEditor();
+  setCollabPresence("viewing", { immediate: true });
 }
 
 function mirrorMindMapTitleToSourceNode(title) {
@@ -7097,7 +8882,9 @@ function setMindMapMemoPreviewEnabled(enabled) {
 function updateMindMapPresentationToggle() {
   const button = els.mindMapPresentationToggle;
   if (!button) return;
-  const enabled = isMindMapPresentationMode();
+  // 実際にホストが発表モードをオンにしたかどうかだけを表示する
+  // （閲覧専用ゲストの制限と混同しないように、生のフラグを見る）。
+  const enabled = Boolean(state.mindMapPresentationMode);
   button.setAttribute("aria-checked", String(enabled));
   button.title = enabled ? "発表モードをオフにする" : "発表モードをオンにする";
   const label = button.querySelector(".mindmap-setting-state");
@@ -7216,8 +9003,10 @@ function openMindMapNodeMemoFullscreen(nodeId) {
 
 els.mindMapBtn.addEventListener("click", openMindMapPanel);
 els.mindMapClose.addEventListener("click", closeMindMapPanel);
+els.mindMapTitleInput.addEventListener("focus", () => setCollabPresence("mindmap-title", { immediate: true }));
 els.mindMapTitleInput.addEventListener("input", () => {
   if (!state.mindMap || isMindMapPresentationMode()) return;
+  setCollabPresence("mindmap-title");
   beginMindMapEditUndo();
   state.mindMap.title = (els.mindMapTitleInput.value || "新しいマインドマップ").slice(0, 80);
   mirrorMindMapTitleToSourceNode(state.mindMap.title);
@@ -7230,19 +9019,23 @@ els.mindMapTitleInput.addEventListener("blur", () => {
   els.mindMapTitleInput.value = state.mindMap.title;
   endMindMapEditUndo();
   scheduleMindMapSave();
+  setCollabPresence("mindmap");
 });
+els.mindMapNodeTitleInput.addEventListener("focus", () => setCollabPresence("mindmap-node-title", { immediate: true }));
 els.mindMapNodeTitleInput.addEventListener("compositionstart", () => {
   _isMindMapNodeTitleComposing = true;
 });
 els.mindMapNodeTitleInput.addEventListener("compositionend", e => {
   _isMindMapNodeTitleComposing = false;
   if (isMindMapPresentationMode()) return;
+  setCollabPresence("mindmap-node-title");
   beginMindMapEditUndo();
   updateSelectedMindMapTitle(e.currentTarget.value);
 });
 els.mindMapNodeTitleInput.addEventListener("input", e => {
   if (isMindMapPresentationMode()) return;
   if (isImeComposing(e, _isMindMapNodeTitleComposing)) return;
+  setCollabPresence("mindmap-node-title");
   beginMindMapEditUndo();
   updateSelectedMindMapTitle(e.currentTarget.value);
 });
@@ -7251,6 +9044,7 @@ els.mindMapNodeTitleInput.addEventListener("blur", () => {
   const selected = getMindMapNode(state.mindMapSelectedId);
   if (!selected) {
     endMindMapEditUndo();
+    setCollabPresence("mindmap");
     return;
   }
   selected.title = (els.mindMapNodeTitleInput.value.trim() || "トピック").slice(0, 80);
@@ -7259,6 +9053,7 @@ els.mindMapNodeTitleInput.addEventListener("blur", () => {
   endMindMapEditUndo();
   renderMindMap();
   scheduleMindMapSave();
+  setCollabPresence("mindmap");
 });
 els.mindMapNodeTitleInput.addEventListener("keydown", e => {
   if (e.key === "Enter" && !isImeComposing(e, _isMindMapNodeTitleComposing)) {
@@ -7266,10 +9061,12 @@ els.mindMapNodeTitleInput.addEventListener("keydown", e => {
     els.mindMapNodeTitleInput.blur();
   }
 });
+els.mindMapNodeMemoInput?.addEventListener("focus", () => setCollabPresence("mindmap-node-memo", { immediate: true }));
 els.mindMapNodeMemoInput?.addEventListener("input", () => {
   if (isMindMapPresentationMode()) return;
   const selected = getMindMapNode(state.mindMapSelectedId);
   if (!selected) return;
+  setCollabPresence("mindmap-node-memo");
   beginMindMapEditUndo();
   selected.memo = els.mindMapNodeMemoInput.value;
   const nodeEl = els.mindMapNodes.querySelector(`.mindmap-node[data-id="${selected.id}"]`);
@@ -7278,6 +9075,7 @@ els.mindMapNodeMemoInput?.addEventListener("input", () => {
 });
 els.mindMapNodeMemoInput?.addEventListener("blur", () => {
   endMindMapEditUndo();
+  setCollabPresence("mindmap");
 });
 els.mindMapNodes?.addEventListener("mouseover", e => {
   const nodeBtn = e.target.closest(".mindmap-node");
@@ -7646,7 +9444,7 @@ async function createInlineImageDataUrl(file) {
 async function uploadFileToStorage(file) {
   const ext = mediaFileExtension(file);
   const mediaId = makeId();
-  const storagePath = `users/${state.uid}/media/${mediaId}.${ext}`;
+  const storagePath = `${mediaStoragePrefix()}/${mediaId}.${ext}`;
   const fileRef = storage.ref(storagePath);
   await fileRef.put(file, { contentType: file.type });
   return {
@@ -8079,8 +9877,15 @@ function repairMediaCaretAfterEdit() {
   placeCaretInMediaCaretAnchor(anchor);
 }
 
+function assignMissingMediaIds(root = els.contentInput) {
+  root.querySelectorAll(".inline-media-figure").forEach(figure => {
+    if (!figure.dataset.mediaId) figure.dataset.mediaId = makeId();
+  });
+}
+
 function ensureMediaTextLines() {
   lockInlineMediaDrag();
+  assignMissingMediaIds();
   normalizeMediaCaretAnchors();
   els.contentInput.querySelectorAll(".inline-media-figure").forEach(figure => {
     const prev = getMediaBoundarySibling(figure, "previousSibling");
@@ -8713,14 +10518,20 @@ function showCtxMenu(x, y, noteId) {
   state.contextNoteId = noteId;
   const note  = getNotes().find(n => n.id === noteId);
   const accessLocked = Boolean(note) && isNoteAccessLocked(note.id);
+  const readOnly = isGuestReadOnly();
   els.contextMenu.querySelectorAll("[data-action]").forEach(button => {
+    if (readOnly && button.dataset.action !== "open-lock") {
+      button.disabled = true;
+      button.title = "ホストが閲覧専用に設定しています";
+      return;
+    }
     button.disabled = accessLocked
       && button.dataset.action !== "toggle-lock"
       && button.dataset.action !== "open-lock";
   });
   const pinBtn = els.contextMenu.querySelector('[data-action="toggle-pin"]');
   if (pinBtn) {
-    const canPin = note?.parent_id === null;
+    const canPin = note?.parent_id === null && !isCollabActive();
     pinBtn.hidden = !canPin;
     pinBtn.textContent = note?.pinned ? "📌　ピン留めを解除" : "📌　ピン留め";
   }
@@ -8739,6 +10550,8 @@ function showCtxMenu(x, y, noteId) {
   const syncBtn = els.contextMenu.querySelector('[data-action="convert-mindmap"]');
   if (syncBtn) {
     const isSynced = Boolean(note?.linked_mindmap_id);
+    const blockedByCollab = isCollabActive() && note?.parent_id !== null;
+    const blockedByGuestOnly = isCollabActive() && state.collabRoomRole !== "host";
     if (isSynced) {
       const mapTitle = state.mindMapList?.find(m => m.id === note.linked_mindmap_id)?.title;
       syncBtn.textContent = `✓　同期済み${mapTitle ? `「${mapTitle}」` : ""}`;
@@ -8746,7 +10559,10 @@ function showCtxMenu(x, y, noteId) {
       syncBtn.classList.add("ctx-item-synced");
     } else {
       syncBtn.textContent = "⇄　マインドマップと同期";
-      syncBtn.disabled = accessLocked;
+      syncBtn.disabled = accessLocked || blockedByCollab || blockedByGuestOnly || readOnly;
+      syncBtn.title = blockedByCollab
+        ? "共同作業中は、共有中の親メモ以外はマインドマップと同期できません"
+        : blockedByGuestOnly ? "共同作業中、マインドマップとの同期はホストだけができます" : "";
       syncBtn.classList.remove("ctx-item-synced");
     }
   }
@@ -8758,14 +10574,30 @@ function showCtxMenu(x, y, noteId) {
   const lockBtn = els.contextMenu.querySelector('[data-action="toggle-lock"]');
   if (lockBtn) {
     const canManageLock = Boolean(note?.locked) || isLockableParentNote(note);
-    lockBtn.hidden = !canManageLock;
-    lockBtn.disabled = !canManageLock;
+    // 鍵の解除（既にロック済みのメモを開けるようにする）は許可するが、
+    // 共同作業中に新しく鍵をかけると本人以外のパスワードでは開けなくなり
+    // 他の参加者が締め出されるため、新規ロックだけは隠す。
+    const wouldCreateLock = !note?.locked;
+    lockBtn.hidden = !canManageLock || (isCollabActive() && wouldCreateLock);
+    lockBtn.disabled = !canManageLock || readOnly;
     lockBtn.textContent = note?.locked ? "🔓　鍵を外す" : "🔒　鍵をかける";
   }
   const relockBtn = els.contextMenu.querySelector('[data-action="relock-note"]');
   if (relockBtn) {
     relockBtn.hidden = !note?.locked || !state.unlockedNoteIds.has(note.id);
-    relockBtn.disabled = false;
+    relockBtn.disabled = readOnly;
+  }
+  const deleteBtn = els.contextMenu.querySelector('[data-action="delete"]');
+  if (deleteBtn) {
+    const blockedByCollab = isCollabActive() && note?.parent_id === null;
+    if (blockedByCollab || readOnly) deleteBtn.disabled = true;
+    deleteBtn.title = blockedByCollab ? "共同作業中は親メモを削除できません" : "";
+  }
+  const renameBtn = els.contextMenu.querySelector('[data-action="rename"]');
+  if (renameBtn) {
+    const blockedByCollab = !canEditNoteTitle(note);
+    if (blockedByCollab || readOnly) renameBtn.disabled = true;
+    renameBtn.title = blockedByCollab ? "共同作業中、親メモの名前を変更できるのはホストだけです" : "";
   }
   els.contextMenu.hidden = false;
   els.contextMenu.style.left = `${x}px`;
@@ -8827,6 +10659,8 @@ function handleTreeRenameEnter(e) {
 
 function startInlineRename(noteId) {
   if (isNoteAccessLocked(noteId)) return;
+  if (blockIfGuestReadOnly()) return;
+  if (blockRootRenameForGuest(getNotes().find(n => n.id === noteId))) return;
   const row = els.tree.querySelector(`[data-id="${noteId}"]`);
   if (!row) {
     if (state.selectedId === noteId) {
@@ -8906,6 +10740,14 @@ document.addEventListener("click", e => {
   if (!els.noteListPanel?.hidden && !els.noteListPanel.contains(e.target) && !els.noteListBtn?.contains(e.target)) {
     closeNoteListPanel();
   }
+  const clickedCollabStatus = Boolean(
+    els.collabStatusPanel?.contains(e.target) ||
+    els.collabStatusBtn?.contains(e.target) ||
+    els.mindMapCollabStatusBtn?.contains(e.target)
+  );
+  if (!els.collabStatusPanel?.hidden && !clickedCollabStatus) {
+    closeCollabStatusPanel();
+  }
   const clickedMemoSettings = Boolean(
     els.memoSettingsPanel?.contains(e.target) ||
     els.memoSettingsBtn?.contains(e.target)
@@ -8968,9 +10810,19 @@ document.addEventListener("keydown", e => {
     closeNoteLockPrompt(false);
     return;
   }
+  if (e.key === "Escape" && !els.hostTransferOverlay?.hidden) {
+    e.preventDefault();
+    closeHostTransferDialog();
+    return;
+  }
   if (e.key === "Escape" && !els.appManagementOverlay?.hidden) {
     e.preventDefault();
-    if (!els.appHowToDialog?.hidden || !els.appInfoDialog?.hidden || !els.appAccountDialog?.hidden) showAppManagementHome(true);
+    if (
+      !els.appHowToDialog?.hidden ||
+      !els.appInfoDialog?.hidden ||
+      !els.appCollabDialog?.hidden ||
+      !els.appAccountDialog?.hidden
+    ) showAppManagementHome(true);
     else closeAppManagement();
     return;
   }
@@ -8987,6 +10839,11 @@ document.addEventListener("keydown", e => {
   if (e.key === "Escape" && !els.noteListPanel?.hidden) {
     e.preventDefault();
     closeNoteListPanel();
+    return;
+  }
+  if (e.key === "Escape" && !els.collabStatusPanel?.hidden) {
+    e.preventDefault();
+    closeCollabStatusPanel();
     return;
   }
   const mindMapSettingsOpen = !els.mindMapSettingsPanel?.hidden || !els.mindMapNodeSettingsPanel?.hidden;
@@ -9103,7 +10960,12 @@ if (mobileMenuMql.addEventListener) {
 }
 setMobileMenuOpen(false);
 
-els.titleInput.addEventListener("input", scheduleSave);
+els.titleInput.addEventListener("focus", () => setCollabPresence("title", { immediate: true }));
+els.titleInput.addEventListener("input", () => {
+  setCollabPresence("title");
+  scheduleSave();
+});
+els.titleInput.addEventListener("blur", () => setCollabPresence("viewing"));
 els.memoSettingsBtn?.addEventListener("click", e => {
   e.stopPropagation();
   toggleMemoSettingsPanel();
@@ -9157,14 +11019,17 @@ els.memoHeadingBtn?.addEventListener("click", e => {
 els.contentInput.addEventListener("focus", () => {
   els.contentInput.classList.add("is-focused");
   updateMemoFormatUiFromSelection();
+  setCollabPresence("content", { immediate: true });
 });
 els.contentInput.addEventListener("click", () => {
   els.contentInput.classList.add("is-focused");
   updateMemoFormatUiFromSelection();
+  setCollabPresence("content");
 });
 els.contentInput.addEventListener("blur", () => {
   els.contentInput.classList.remove("is-focused");
   clearActiveMediaCaret();
+  setCollabPresence("viewing");
 });
 els.contentInput.addEventListener("compositionstart", () => { _isComposing = true; redirectMediaCaretTyping(); });
 els.contentInput.addEventListener("compositionend",   () => { _isComposing = false; repairMediaCaretAfterEdit(); scheduleSave(); });
@@ -9175,6 +11040,7 @@ els.contentInput.addEventListener("keydown", e => {
   redirectMediaCaretTyping();
 });
 els.contentInput.addEventListener("input", () => {
+  setCollabPresence("content");
   repairMediaCaretAfterEdit();
   updateEmptyState();
   updateMemoFormatUiFromSelection();
@@ -9184,6 +11050,8 @@ els.contentInput.addEventListener("keyup", e => {
   if (e.key === "Backspace" || e.key === "Delete") repairMediaCaretAfterEdit();
   updateMemoFormatUiFromSelection();
 });
+els.contentInput.addEventListener("scroll", renderCollabCaretFlags);
+window.addEventListener("resize", renderCollabCaretFlags);
 
 els.searchInput.addEventListener("input", renderTree);
 
@@ -9278,6 +11146,7 @@ const AUTH_ERROR_MESSAGES = {
   "auth/too-many-requests":      "試行回数が多すぎます。しばらくしてからお試しください。",
   "auth/network-request-failed": "通信に失敗しました。ネットワークをご確認ください。",
   "auth/requires-recent-login":  "セキュリティのため、再度ログインしてからお試しください。",
+  "auth/unauthorized-continue-uri": "確認メールの戻り先ドメインがFirebaseで許可されていません。管理者はFirebase AuthenticationのAuthorized domainsに現在のドメインを追加してください。",
 };
 
 function translateAuthError(err) {
@@ -9382,8 +11251,26 @@ function emailActionSettings() {
   };
 }
 
+function isUnauthorizedContinueUriError(error) {
+  return error?.code === "auth/unauthorized-continue-uri";
+}
+
 function sendVerificationEmail(user) {
-  return user.sendEmailVerification(emailActionSettings());
+  return user.sendEmailVerification(emailActionSettings()).catch(error => {
+    if (isUnauthorizedContinueUriError(error)) {
+      return user.sendEmailVerification();
+    }
+    throw error;
+  });
+}
+
+function sendPasswordResetEmail(email) {
+  return auth.sendPasswordResetEmail(email, emailActionSettings()).catch(error => {
+    if (isUnauthorizedContinueUriError(error)) {
+      return auth.sendPasswordResetEmail(email);
+    }
+    throw error;
+  });
 }
 
 async function resendVerificationSilently(user) {
@@ -9460,15 +11347,9 @@ async function handleResendVerification() {
     await user.reload();
     if (user.emailVerified) {
       updateAccountUI(user);
-      if (state.uid !== user.uid) resetMindMapState();
-      state.uid = user.uid;
       showApp();
       try {
-        [state.templates, state.mindMapTemplates] = await Promise.all([
-          ensureOfficialTemplates(user.uid),
-          ensureOfficialMindMapTemplates(user.uid),
-        ]);
-        await loadNotes();
+        await loadSignedInWorkspace(user);
       } catch (e) { showToast(e.message); }
       showToast("メール確認済みです。");
       return;
@@ -9486,14 +11367,9 @@ async function handleRefreshStatus() {
     await user.reload();
     updateAccountUI(user);
     if (user.emailVerified) {
-      state.uid = user.uid;
       showApp();
       try {
-        [state.templates, state.mindMapTemplates] = await Promise.all([
-          ensureOfficialTemplates(user.uid),
-          ensureOfficialMindMapTemplates(user.uid),
-        ]);
-        await loadNotes();
+        await loadSignedInWorkspace(user);
       } catch (e) { showToast(e.message); }
       showToast("メール確認済みです。");
     } else {
@@ -9559,9 +11435,16 @@ async function handleDeleteAccount(e) {
     await user.delete();
     console.log("[deleteAccount] auth user deleted");
 
+    await clearCollabPresence();
+    stopWorkspaceSnapshots();
+    clearSavedCollabRoom(user.uid);
     state.uid = null;
+    state.collabRoomId = null;
+    state.collabRoomLabel = "";
+    state.collabRoomRole = null;
     resetMindMapState();
     showAuthScreen();
+    updateCollabUI();
     showToast("アカウントを削除しました。");
   } catch (err) {
     console.error("[deleteAccount] failed:", err);
@@ -9610,7 +11493,7 @@ if (auth) {
     authFlowInProgress = true;
     try {
       if (authMode === "forgot") {
-        await auth.sendPasswordResetEmail(email, emailActionSettings());
+        await sendPasswordResetEmail(email);
         showAuthInfo(`再設定メールを送信しました。${EMAIL_DELIVERY_HELP}`);
       } else {
         await applyAuthPersistence();
@@ -9712,22 +11595,22 @@ if (!auth) {
         return;
       }
 
-      if (state.uid !== user.uid) state.unlockedNoteIds.clear();
-      state.uid = user.uid;
       showApp();
       updateAccountUI(user);
       try {
-        [state.templates, state.mindMapTemplates] = await Promise.all([
-          ensureOfficialTemplates(user.uid),
-          ensureOfficialMindMapTemplates(user.uid),
-        ]);
-        await loadNotes();
+        await loadSignedInWorkspace(user);
       } catch (e) { showToast(e.message); }
     } else {
+      void clearCollabPresence();
+      stopWorkspaceSnapshots();
       state.uid = null;
+      state.collabRoomId = null;
+      state.collabRoomLabel = "";
+      state.collabRoomRole = null;
       state.unlockedNoteIds.clear();
       closeNoteLockPrompt(false);
       resetMindMapState();
+      updateCollabUI();
       showAuthScreen();
     }
   });

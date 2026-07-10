@@ -359,5 +359,5 @@ def api_ai_mindmap():
 
 
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", "5002"))
+    port = int(os.getenv("PORT", "5003"))
     app.run(debug=True, port=port)

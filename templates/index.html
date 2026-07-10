@@ -64,6 +64,11 @@
           <span class="btn-icon" aria-hidden="true">↶</span>
           <span class="btn-label">戻す</span>
         </button>
+        <button id="collabStatusBtn" class="mindmap-tool-btn collab-status-btn" type="button" title="共同作業中のメンバーを表示" aria-label="共同作業中のメンバーを表示" aria-haspopup="dialog" aria-expanded="false" aria-controls="collabStatusPanel" hidden>
+          <span class="btn-icon" aria-hidden="true">👥</span>
+          <span class="btn-label">共同作業中</span>
+          <span id="collabStatusCount" class="collab-status-count" hidden>0</span>
+        </button>
       </div>
     </header>
 
@@ -178,6 +183,10 @@
               <span class="btn-icon" aria-hidden="true">⇄</span>
               <span class="btn-label">マップ同期</span>
             </button>
+            <button id="memoCollabBtn" class="settings-action-btn" type="button" title="合言葉で共同編集" aria-label="合言葉で共同編集" aria-haspopup="dialog" aria-expanded="false" aria-controls="appCollabDialog">
+              <span class="btn-icon" aria-hidden="true"><img class="collab-icon-img" src="{{ url_for('static', filename='icons/collab-icon.png') }}" alt="" width="18" height="17"></span>
+              <span class="btn-label">共同編集</span>
+            </button>
             <button id="deleteBtn" class="settings-action-btn danger" title="選択中のメモを削除">
               <span class="btn-icon" aria-hidden="true">🗑</span>
               <span class="btn-label">削除</span>
@@ -228,6 +237,33 @@
         <span>Ctrl / ⌘ + S で保存・Z で戻る</span>
       </footer>
     </main>
+  </div>
+
+  <!-- 共同作業中パネル（メモ画面・マインドマップ画面どちらからも開けるよう、
+       .app-shell の外に置く。中に置くとマインドマップ表示中は
+       .app-shell ごと hidden になり反応しなくなるため） -->
+  <div id="collabStatusPanel" class="context-menu collab-status-panel" role="dialog" aria-label="共同作業中のメンバー" hidden>
+    <div class="collab-status-panel-head">
+      <p class="mindmap-list-header">共同作業中</p>
+      <button id="collabStatusClose" class="mindmap-list-icon-btn" type="button" title="閉じる" aria-label="共同作業パネルを閉じる">×</button>
+    </div>
+    <p id="collabStatusRoomLabel" class="collab-status-room-label"></p>
+    <ul id="collabStatusMembers" class="collab-status-members"></ul>
+    <div id="collabStatusHostSection" hidden>
+      <div class="ctx-sep"></div>
+      <button id="collabStatusHostMenuBtn" class="ctx-item collab-status-host-toggle" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="collabStatusHostMenu">
+        <span>👑　ホスト機能</span>
+        <span class="collab-status-host-toggle-arrow" aria-hidden="true">›</span>
+      </button>
+      <div id="collabStatusHostMenu" class="collab-status-host-menu" hidden>
+        <button id="collabStatusReadOnlyBtn" class="ctx-item" type="button">ゲストを閲覧専用にする</button>
+        <button id="collabStatusRegenerateBtn" class="ctx-item" type="button">合言葉を作り直す</button>
+        <button id="collabStatusEndRoomBtn" class="ctx-item ctx-danger" type="button">共同ルームを終了する</button>
+      </div>
+    </div>
+    <div class="ctx-sep"></div>
+    <button id="collabStatusSettingsBtn" class="ctx-item" type="button">合言葉・共同編集の設定</button>
+    <button id="collabStatusLeaveBtn" class="ctx-item ctx-danger" type="button">共同作業から抜ける</button>
   </div>
 
   <!-- メディア添付用ファイル入力（非表示） -->
@@ -344,6 +380,19 @@
     </form>
   </div>
 
+  <div id="hostTransferOverlay" class="note-lock-overlay" hidden>
+    <div class="note-lock-dialog host-transfer-dialog" role="dialog" aria-modal="true" aria-labelledby="hostTransferTitle">
+      <h2 id="hostTransferTitle">ホストを引き継ぐ人を選んでください</h2>
+      <p class="note-lock-message">あなたが退出すると、選んだ人がこの共同ルームのホストになります。</p>
+      <ul id="hostTransferList" class="host-transfer-list"></ul>
+      <p class="host-transfer-note">※ホストを選択しない場合は、先に参加した人がホストになります</p>
+      <div class="note-lock-actions">
+        <button id="hostTransferCancelBtn" class="btn ghost" type="button">キャンセル</button>
+        <button id="hostTransferSkipBtn" class="btn ghost" type="button">退出</button>
+      </div>
+    </div>
+  </div>
+
   <!-- メディア右クリックメニュー -->
   <div id="mediaContextMenu" class="context-menu" hidden>
     <!-- 画像のみ表示（動画では hidden） -->
@@ -444,6 +493,11 @@
           <button id="mindMapUndoBtn" class="mindmap-tool-btn" type="button" title="一つ前に戻る（Ctrl / ⌘ + Z）" disabled>
             <span class="btn-icon" aria-hidden="true">↶</span>
             <span class="btn-label">戻す</span>
+          </button>
+          <button id="mindMapCollabStatusBtn" class="mindmap-tool-btn collab-status-btn" type="button" title="共同作業中のメンバーを表示" aria-label="共同作業中のメンバーを表示" aria-haspopup="dialog" aria-expanded="false" aria-controls="collabStatusPanel" hidden>
+            <span class="btn-icon" aria-hidden="true">👥</span>
+            <span class="btn-label">共同作業中</span>
+            <span id="mindMapCollabStatusCount" class="collab-status-count" hidden>0</span>
           </button>
         </div>
       </header>
@@ -726,6 +780,7 @@
           </div>
 
           <p id="mindMapStatus" class="mindmap-status">準備中...</p>
+          <div id="mindMapPresencePanel" class="collab-presence-panel mindmap-presence-panel" aria-live="polite" hidden></div>
         </aside>
 
         <div id="mindMapMemoTooltip" class="mindmap-memo-tooltip" hidden></div>
@@ -781,6 +836,15 @@
           <span>
             <strong>データについて</strong>
             <small>メモとマップの保存について</small>
+          </span>
+          <span class="app-management-menu-arrow" aria-hidden="true">›</span>
+        </button>
+
+        <button id="appCollabBtn" class="app-management-menu-btn" type="button" aria-haspopup="dialog" aria-controls="appCollabDialog" aria-expanded="false">
+          <span class="app-management-menu-icon" aria-hidden="true"><img class="collab-icon-img" src="{{ url_for('static', filename='icons/collab-icon-white.png') }}" alt="" width="20" height="19"></span>
+          <span>
+            <strong>共同編集</strong>
+            <small>合言葉で共有ワークスペースへ切り替え</small>
           </span>
           <span class="app-management-menu-arrow" aria-hidden="true">›</span>
         </button>
@@ -898,7 +962,7 @@
       </div>
 
       <div id="appDataInfoPanel" class="app-info-content" hidden>
-        <p>メモとマインドマップは、ログイン中のアカウントごとに保存されます。同じアカウントでログインすると、別の端末からも保存した内容を確認できます。</p>
+        <p>メモとマインドマップは、通常はログイン中のアカウントごとに保存されます。共同編集では、合言葉から作られる共有ワークスペースに保存されます。</p>
       </div>
 
       <div id="appCreatorInfoPanel" class="app-info-content" hidden>
@@ -911,6 +975,44 @@
         <p>ご意見、不具合の報告、追加してほしい機能などをフォームからお送りください。</p>
         <a class="app-management-link" href="https://docs.google.com/forms/d/e/1FAIpQLSePfOxSZwYoGcL7csdt1RbLY4eQ9gdu6ePqcgZ96xTxZj8GXA/viewform?usp=publish-editor" target="_blank" rel="noopener noreferrer">お問い合わせフォームを開く</a>
       </div>
+    </section>
+
+    <section id="appCollabDialog" class="app-management-dialog app-collab-dialog" role="dialog" aria-modal="true" aria-labelledby="appCollabTitle" hidden>
+      <div class="templates-head">
+        <div class="app-howto-heading">
+          <button id="appCollabBack" class="app-management-back" type="button" aria-label="アプリ設定へ戻る">←</button>
+          <p id="appCollabTitle" class="templates-title">共同編集</p>
+        </div>
+        <button id="appCollabClose" class="templates-close" type="button" title="閉じる" aria-label="共同編集画面を閉じる">×</button>
+      </div>
+
+      <div class="app-collab-summary">
+        <div>
+          <p id="appCollabMode" class="app-collab-mode">個人メモ</p>
+          <p id="appCollabDetail" class="app-collab-detail">このアカウント専用</p>
+        </div>
+      </div>
+
+      <form id="appCollabForm" class="app-collab-form">
+        <div class="app-collab-role-toggle" role="group" aria-label="参加方法">
+          <button id="appCollabHostBtn" class="app-collab-role-btn" type="button" data-collab-role="host" aria-pressed="true">ホスト</button>
+          <button id="appCollabGuestBtn" class="app-collab-role-btn" type="button" data-collab-role="guest" aria-pressed="false">ゲスト</button>
+        </div>
+        <label class="auth-field">
+          <span id="appCollabPassphraseLabel">合言葉</span>
+          <div class="app-collab-passphrase-row">
+            <input id="appCollabPassphrase" type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="off" minlength="4" maxlength="4" placeholder="4桁の数字">
+            <button id="appCollabRegenerateBtn" type="button" class="app-collab-regenerate-btn" title="別の番号を作り直す" aria-label="別の番号を作り直す" hidden>🔄</button>
+          </div>
+        </label>
+        <label class="auth-remember app-collab-show">
+          <input id="appCollabShowPassphrase" type="checkbox">
+          <span>合言葉を表示する</span>
+        </label>
+        <p id="appCollabError" class="auth-error" role="alert" hidden></p>
+        <button id="appCollabJoinBtn" class="btn" type="submit">ホストとして開始</button>
+      </form>
+
     </section>
 
     <section id="appAccountDialog" class="app-management-dialog app-account-dialog" role="dialog" aria-modal="true" aria-labelledby="appAccountTitle" hidden>

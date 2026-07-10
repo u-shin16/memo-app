@@ -39,6 +39,11 @@
 - メモとマインドマップの双方向同期
   - 「マップ化」または「メモ化」で作成した組み合わせを自動同期
   - タイトル・本文・子要素の追加・並び順・削除を相互に反映
+- 合言葉による共同編集
+  - ホストが「ホストとして開始」を押すと4桁の数字の合言葉が自動生成され、それをゲストに伝えて同じ数字で参加してもらう
+  - ホスト作成時は、開いている親メモ1件（配下のメモ・同期中のマインドマップを含む）だけを共同ルームへコピー。他の個人メモは共有されない
+  - 変更はFirestoreのリアルタイム購読で他の参加者へ反映
+  - 共同作業中はヘッダー右上に「共同作業中」ボタンが表示され、参加メンバーの確認・共同編集設定・退出をワンクリックで行える
 - ドラッグ操作でメモ移動
   - メモとメモの間へドロップ → 同じ階層内で並び替え
   - 子メモをルート側の先頭/末尾ゾーンへドロップ → 同じ親メモ配下の子メモ同士で先頭/末尾へ移動
@@ -95,7 +100,8 @@ http://127.0.0.1:5001
 2. 「プロジェクトの設定」→「全般」→「マイアプリ」で新しいWebアプリを登録する
 3. 表示される `firebaseConfig`（apiKey, authDomain, projectId, storageBucket, messagingSenderId, appId, measurementId）を [`static/js/firebase-config.js`](static/js/firebase-config.js) の `firebaseConfig` に貼り付ける
 4. 「Authentication」→「Sign-in method」で「メール/パスワード」プロバイダを有効にする
-5. 「Authentication」→「Settings」→「Authorized domains」に公開ドメイン（例: `musubimemo.webtool-labs.com`）を追加する
+5. 「Authentication」→「Settings」→「Authorized domains」に公開ドメイン（例: `matome.webtool-labs.com`）を追加する
+   - 確認メール再送時に `auth/unauthorized-continue-uri` が出る場合、この設定が不足しています
 6. 「Authentication」→「Templates」→「メールアドレスの確認」で、アクションURLを `https://<公開ドメイン>/auth/action` に設定する
 7. 「Firestore Database」を開き、本番モードでデータベースを作成する。「ルール」タブで、このリポジトリの [`firestore.rules`](firestore.rules) の内容を貼り付けてPublishする
 8. 「Storage」を開き、Storageを有効化する（**プロジェクトがSparkプランの場合、Blazeプラン（従量課金）へのアップグレードを求められることがあります**）。「Rules」タブで、このリポジトリの [`storage.rules`](storage.rules) の内容を貼り付けてPublishする
@@ -150,10 +156,20 @@ Gmailの迷惑メール判定はアプリのコードだけでは完全に制御
 
 - `users/{uid}/notes/{noteId}`
 - `users/{uid}/templates/{templateId}`
+- `users/{uid}/mindmaps/{mindMapId}`
 
 添付した画像・動画はFirebase Storageの `users/{uid}/media/` 以下に保存されます。
 
-`firestore.rules`・`storage.rules` により、各ユーザーは自分の `uid` 配下のデータのみ読み書きできます。バックエンドサーバーはメモ・メディアのデータを一切経由・保存しません。
+共同編集では、ランダムなIDを持つ共同ルームへ以下を保存します。合言葉自体はルームIDには使わず、ブラウザ側で生成したSHA-256ハッシュから `passphraseIndex/{hash}` を経由してルームIDを引きます。これにより「合言葉を作り直す」操作でも、中身（メモ・マインドマップ・参加者）は同じルームのまま、合言葉のポインタだけを差し替えられます。
+
+- `passphraseIndex/{hash}` → `{ room_id }`
+- `collabRooms/{roomId}/notes/{noteId}`
+- `collabRooms/{roomId}/mindmaps/{mindMapId}`
+- `collabRooms/{roomId}/members/{uid}`
+- `collabRooms/{roomId}/presence/{uid}`
+- Firebase Storage: `collabRooms/{roomId}/media/`
+
+`firestore.rules` により、個人データは各ユーザーの `uid` 配下のみ、共同編集データは参加者として登録されたログイン済みユーザーが読み書きできます。共同ルーム本体の更新はホストのみ許可されます。共同編集中の表示用presenceは、参加者が互いに読み取れ、自分の状態だけを書き込めます。`storage.rules` では個人メディアを本人限定、共同メディアをログイン済みユーザーかつ有効なルームID配下に限定します。バックエンドサーバーはメモ・メディアのデータを一切経由・保存しません。
 
 ## 既存データの移行（旧バージョンからのアップグレード）
 

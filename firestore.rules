@@ -1,8 +1,115 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function validRoomId(roomId) {
+      return roomId.matches('^[a-f0-9]{64}$');
+    }
+
+    function roomPath(roomId) {
+      return /databases/$(database)/documents/collabRooms/$(roomId);
+    }
+
+    function memberPath(roomId, uid) {
+      return /databases/$(database)/documents/collabRooms/$(roomId)/members/$(uid);
+    }
+
+    function roomHostUid(roomId) {
+      return get(roomPath(roomId)).data.host_uid;
+    }
+
+    function roomCreatorUid(roomId) {
+      return get(roomPath(roomId)).data.created_by;
+    }
+
+    function isRoomHost(roomId) {
+      return signedIn()
+        && validRoomId(roomId)
+        && exists(roomPath(roomId))
+        && (roomHostUid(roomId) == request.auth.uid || roomCreatorUid(roomId) == request.auth.uid);
+    }
+
+    function isRoomMember(roomId) {
+      return signedIn()
+        && validRoomId(roomId)
+        && exists(memberPath(roomId, request.auth.uid));
+    }
+
+    function canReadSharedRoom(roomId) {
+      return isRoomHost(roomId) || isRoomMember(roomId);
+    }
+
+    function canWriteSharedRoom(roomId) {
+      return isRoomHost(roomId) || isRoomMember(roomId);
+    }
+
     match /users/{uid}/{document=**} {
       allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+
+    // 合言葉（のハッシュ）→ 共同ルームIDの対応表。
+    // ルームIDを合言葉から直接計算しないことで、「合言葉を作り直す」際に
+    // 中身（メモ・マインドマップ・参加者）は同じルームのまま、
+    // 新しい合言葉だけを追加・古い合言葉だけを無効化できるようにする。
+    match /passphraseIndex/{hash} {
+      allow get: if signedIn();
+      allow list: if false;
+      allow create: if signedIn()
+        && request.resource.data.room_id is string
+        && isRoomHost(request.resource.data.room_id);
+      allow update: if false;
+      allow delete: if signedIn() && isRoomHost(resource.data.room_id);
+    }
+
+    match /collabRooms/{roomId} {
+      allow get: if signedIn() && validRoomId(roomId);
+      allow list: if false;
+      allow create: if signedIn()
+        && validRoomId(roomId)
+        && request.resource.data.host_uid == request.auth.uid
+        && request.resource.data.created_by == request.auth.uid;
+      allow update, delete: if isRoomHost(roomId);
+
+      match /members/{memberUid} {
+        allow get: if canReadSharedRoom(roomId) || (signedIn() && request.auth.uid == memberUid);
+        allow list: if isRoomHost(roomId);
+        allow create, update: if signedIn()
+          && validRoomId(roomId)
+          && request.auth.uid == memberUid
+          && exists(roomPath(roomId))
+          && (
+            request.resource.data.role == "guest"
+            || (request.resource.data.role == "host" && roomHostUid(roomId) == request.auth.uid)
+          );
+        allow delete: if isRoomHost(roomId) || (signedIn() && request.auth.uid == memberUid);
+      }
+
+      match /presence/{memberUid} {
+        allow read: if canReadSharedRoom(roomId);
+        allow create, update: if signedIn()
+          && validRoomId(roomId)
+          && request.auth.uid == memberUid
+          && request.resource.data.uid == request.auth.uid
+          && exists(memberPath(roomId, request.auth.uid));
+        allow delete: if isRoomHost(roomId) || (signedIn() && request.auth.uid == memberUid);
+      }
+
+      match /notes/{noteId} {
+        allow read: if canReadSharedRoom(roomId);
+        allow write: if canWriteSharedRoom(roomId);
+      }
+
+      match /mindmaps/{mindMapId} {
+        allow read: if canReadSharedRoom(roomId);
+        allow write: if canWriteSharedRoom(roomId);
+      }
+
+      match /{document=**} {
+        allow read, write: if false;
+      }
     }
   }
 }
