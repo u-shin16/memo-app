@@ -93,15 +93,19 @@ http://127.0.0.1:5001
 
 ## Firebase設定
 
-このアプリはFirebase Authentication（メール/パスワード）でログインし、メモ・テンプレートはFirestore、添付メディアはFirebase Storageへブラウザから直接保存します（バックエンドAPIは経由しません）。アカウントごと（`uid`単位）にデータが分離されます。
-新規登録後は確認メールが送信され、メール認証が完了するまでアプリ画面は表示されません。
+このアプリはFirebase Authentication（メール/パスワード、およびGoogleログイン）でログインし、メモ・テンプレートはFirestore、添付メディアはFirebase Storageへブラウザから直接保存します（バックエンドAPIは経由しません）。アカウントごと（`uid`単位）にデータが分離されます。
+メール/パスワードで新規登録した場合は確認メールが送信され、メール認証が完了するまでアプリ画面は表示されません（GoogleログインはGoogle側でメール確認済みのため、この待ち時間なしですぐ使えます）。
+
+既にメール/パスワードで登録済みのメールアドレスで「Googleで続ける」を押した場合は、`auth/account-exists-with-different-credential` を検知して自動的に連携ダイアログを出します。既存のパスワードを入力すると、新しい別アカウント（空のメモ）にはならず、同じ`uid`・同じメモのままGoogleログインが使えるようになります。
 
 1. [Firebaseコンソール](https://console.firebase.google.com/)で対象プロジェクトを開く
 2. 「プロジェクトの設定」→「全般」→「マイアプリ」で新しいWebアプリを登録する
 3. 表示される `firebaseConfig`（apiKey, authDomain, projectId, storageBucket, messagingSenderId, appId, measurementId）を [`static/js/firebase-config.js`](static/js/firebase-config.js) の `firebaseConfig` に貼り付ける
-4. 「Authentication」→「Sign-in method」で「メール/パスワード」プロバイダを有効にする
+4. 「Authentication」→「Sign-in method」で「メール/パスワード」と「Google」の両プロバイダを有効にする
+   - 「Google」有効化時にサポートメールの選択を求められるので、管理用のメールアドレスを選ぶ
 5. 「Authentication」→「Settings」→「Authorized domains」に公開ドメイン（例: `matome.webtool-labs.com`）を追加する
    - 確認メール再送時に `auth/unauthorized-continue-uri` が出る場合、この設定が不足しています
+   - Googleログインボタンを押しても反応がない・`auth/unauthorized-domain` が出る場合も、まずここを疑う（`localhost` は自動で許可される）
 6. 「Authentication」→「Templates」→「メールアドレスの確認」で、アクションURLを `https://<公開ドメイン>/auth/action` に設定する
 7. 「Firestore Database」を開き、本番モードでデータベースを作成する。「ルール」タブで、このリポジトリの [`firestore.rules`](firestore.rules) の内容を貼り付けてPublishする
 8. 「Storage」を開き、Storageを有効化する（**プロジェクトがSparkプランの場合、Blazeプラン（従量課金）へのアップグレードを求められることがあります**）。「Rules」タブで、このリポジトリの [`storage.rules`](storage.rules) の内容を貼り付けてPublishする
@@ -149,6 +153,15 @@ Gmailの迷惑メール判定はアプリのコードだけでは完全に制御
 5. Gmail Postmaster Toolsで迷惑メール率を確認し、件名・本文・送信頻度を調整する
 
 確認メールの件名と本文は、長いURLだけが目立つ文面を避け、サービス名が分かる短い件名にしてください。例として、公開サービス名が「はよおきんかい」の場合は件名を `はよおきんかい のメールアドレスの確認` にし、本文末尾も `はよおきんかい チーム` に揃えます。
+
+### VPSなど自前サーバーにデプロイする場合の注意点
+
+Firebase Authentication（Google/メールログインとも）とこのアプリの共同編集機能（`crypto.subtle` によるSHA-256ハッシュ生成）は、ブラウザの「セキュアコンテキスト」を要求します。`localhost` は例外として許可されますが、それ以外のドメイン・IPアドレスでは**HTTPS必須**です。VPS上でHTTPのまま公開すると、ログインボタンを押しても無反応、または `crypto.subtle` 関連のエラーで合言葉ルームが作成できない、といった症状になります。
+
+1. VPSの前段にNginx等のリバースプロキシを立て、Let's Encrypt（certbot）などでTLS証明書を取得し、公開ドメインをHTTPSで待ち受ける
+2. Flask（`app.py`）はプロキシの内側で普段どおりHTTPのまま動かして問題ない（`gunicorn`などでプロセス管理し、Nginxから `proxy_pass` する構成が一般的）
+3. Firebaseコンソールの「Authentication」→「Settings」→「Authorized domains」に、そのHTTPS公開ドメインを追加する（IPアドレスやHTTPのみのドメインは弾かれる）
+4. Googleログインが `auth/unauthorized-domain` で失敗する場合も、まず3を確認する
 
 ## データ保存場所
 

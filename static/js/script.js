@@ -283,6 +283,14 @@ const els = {
   noteLockError:    document.getElementById("noteLockError"),
   noteLockCancel:   document.getElementById("noteLockCancel"),
   noteLockSubmit:   document.getElementById("noteLockSubmit"),
+  googleLinkOverlay: document.getElementById("googleLinkOverlay"),
+  googleLinkForm:    document.getElementById("googleLinkForm"),
+  googleLinkMessage: document.getElementById("googleLinkMessage"),
+  googleLinkPassword: document.getElementById("googleLinkPassword"),
+  googleLinkShowPassword: document.getElementById("googleLinkShowPassword"),
+  googleLinkError:   document.getElementById("googleLinkError"),
+  googleLinkCancel:  document.getElementById("googleLinkCancel"),
+  googleLinkSubmit:  document.getElementById("googleLinkSubmit"),
   hostTransferOverlay: document.getElementById("hostTransferOverlay"),
   hostTransferList:    document.getElementById("hostTransferList"),
   hostTransferSkipBtn: document.getElementById("hostTransferSkipBtn"),
@@ -307,6 +315,7 @@ const els = {
   authNotConfigured:  document.getElementById("authNotConfigured"),
   authFormWrap:       document.getElementById("authFormWrap"),
   authForm:           document.getElementById("authForm"),
+  authGoogleBtn:      document.getElementById("authGoogleBtn"),
   authTitle:          document.getElementById("authTitle"),
   authTabs:           document.querySelectorAll(".auth-tab"),
   authEmail:          document.getElementById("authEmail"),
@@ -2707,6 +2716,99 @@ els.noteLockShowPassword.addEventListener("change", () => {
 });
 els.noteLockOverlay.addEventListener("click", e => {
   if (e.target === els.noteLockOverlay) closeNoteLockPrompt(false);
+});
+
+// ── Googleログインと既存のメール/パスワード登録の連携 ──────────────────────
+// 同じメールアドレスで既にパスワード登録済みの場合、Firestoreは既存のuidと
+// 紐づいているため、Googleで新規サインインさせるとメモが全く別（空）の
+// アカウントに見えてしまう。そこで既存パスワードで一度サインインしてから
+// Google認証情報を連携し、同じuid・同じデータのまま今後どちらでも
+// ログインできるようにする。
+let _googleLinkPendingCred = null;
+let _googleLinkEmail = null;
+let _googleLinkBusy = false;
+
+function getGoogleCredentialFromAuthError(err) {
+  return err?.credential
+    || firebase.auth.GoogleAuthProvider.credentialFromError?.(err)
+    || null;
+}
+
+async function continueAfterGoogleLink(user) {
+  if (!user) return;
+  await user.reload();
+  updateAccountUI(user);
+  if (!user.emailVerified) {
+    showVerificationScreen(user);
+    return;
+  }
+  showApp();
+  if (state.uid !== user.uid || !state.data) {
+    try {
+      await loadSignedInWorkspace(user);
+    } catch (e) { showToast(e.message); }
+  }
+}
+
+function requestGoogleAccountLink(email, pendingCred) {
+  _googleLinkEmail = email;
+  _googleLinkPendingCred = pendingCred;
+  els.googleLinkMessage.textContent =
+    `${email} は既にパスワードで登録されています。パスワードを入力すると、今のメモを引き継いだまま、次回からGoogleでもログインできるようになります。`;
+  els.googleLinkPassword.value = "";
+  els.googleLinkError.hidden = true;
+  els.googleLinkOverlay.hidden = false;
+  requestAnimationFrame(() => els.googleLinkPassword.focus());
+}
+
+function closeGoogleLinkPrompt() {
+  if (_googleLinkBusy) return;
+  els.googleLinkOverlay.hidden = true;
+  els.googleLinkPassword.value = "";
+  _googleLinkPendingCred = null;
+  _googleLinkEmail = null;
+}
+
+els.googleLinkForm.addEventListener("submit", async e => {
+  e.preventDefault();
+  if (_googleLinkBusy) return;
+  const password = els.googleLinkPassword.value;
+  if (!password) {
+    els.googleLinkError.textContent = "パスワードを入力してください。";
+    els.googleLinkError.hidden = false;
+    return;
+  }
+  _googleLinkBusy = true;
+  els.googleLinkSubmit.disabled = true;
+  els.googleLinkCancel.disabled = true;
+  els.googleLinkError.hidden = true;
+  try {
+    const cred = await auth.signInWithEmailAndPassword(_googleLinkEmail, password);
+    const linkedCred = await cred.user.linkWithCredential(_googleLinkPendingCred);
+    const linkedUser = linkedCred?.user || cred.user;
+    const linkedEmail = _googleLinkEmail;
+    els.googleLinkOverlay.hidden = true;
+    els.googleLinkPassword.value = "";
+    _googleLinkPendingCred = null;
+    _googleLinkEmail = null;
+    showToast(`${linkedEmail} にGoogleアカウントを連携しました。`);
+    await continueAfterGoogleLink(linkedUser);
+  } catch (err) {
+    els.googleLinkError.textContent = translateAuthError(err);
+    els.googleLinkError.hidden = false;
+    els.googleLinkPassword.select();
+  } finally {
+    _googleLinkBusy = false;
+    els.googleLinkSubmit.disabled = false;
+    els.googleLinkCancel.disabled = false;
+  }
+});
+els.googleLinkCancel.addEventListener("click", closeGoogleLinkPrompt);
+els.googleLinkShowPassword?.addEventListener("change", () => {
+  els.googleLinkPassword.type = els.googleLinkShowPassword.checked ? "text" : "password";
+});
+els.googleLinkOverlay.addEventListener("click", e => {
+  if (e.target === els.googleLinkOverlay) closeGoogleLinkPrompt();
 });
 
 // ── ローカルヘルパー（ID・日時・コレクション参照）──────────────────────────────────
@@ -11147,6 +11249,9 @@ const AUTH_ERROR_MESSAGES = {
   "auth/network-request-failed": "通信に失敗しました。ネットワークをご確認ください。",
   "auth/requires-recent-login":  "セキュリティのため、再度ログインしてからお試しください。",
   "auth/unauthorized-continue-uri": "確認メールの戻り先ドメインがFirebaseで許可されていません。管理者はFirebase AuthenticationのAuthorized domainsに現在のドメインを追加してください。",
+  "auth/account-exists-with-different-credential": "このメールアドレスは既にパスワードでの登録があります。パスワードでログインしてください。",
+  "auth/unauthorized-domain": "このドメインはFirebaseで許可されていません。管理者はFirebase AuthenticationのAuthorized domainsに現在のドメインを追加してください。",
+  "auth/popup-blocked": "ポップアップがブロックされました。ブラウザの設定を確認するか、もう一度お試しください。",
 };
 
 function translateAuthError(err) {
@@ -11480,6 +11585,37 @@ if (auth) {
   els.authShowPassword.addEventListener("change", updatePasswordVisibility);
   els.authForgotLink.addEventListener("click", () => setAuthMode("forgot"));
   els.authBackToLoginLink.addEventListener("click", () => setAuthMode("login"));
+
+  els.authGoogleBtn?.addEventListener("click", async () => {
+    els.authError.hidden = true;
+    els.authInfo.hidden  = true;
+    els.authGoogleBtn.disabled = true;
+    authFlowInProgress = true;
+    try {
+      await applyAuthPersistence();
+      const provider = new firebase.auth.GoogleAuthProvider();
+      await auth.signInWithPopup(provider);
+      // ここから先はGoogleのメールが検証済みなので、確認メール待ち画面には行かず
+      // onAuthStateChangedが通常のアプリ起動フローへ進める。
+    } catch (err) {
+      if (err?.code === "auth/account-exists-with-different-credential") {
+        // 同じメールで既にパスワード登録済み。新規の別アカウントにはせず、
+        // 既存アカウントへGoogleを連携できるよう促す（データを保持するため）。
+        const email = err.email || err.customData?.email || null;
+        const pendingCred = getGoogleCredentialFromAuthError(err);
+        if (email && pendingCred) {
+          requestGoogleAccountLink(email, pendingCred);
+        } else {
+          showAuthError(translateAuthError(err));
+        }
+      } else if (err?.code !== "auth/popup-closed-by-user" && err?.code !== "auth/cancelled-popup-request") {
+        showAuthError(translateAuthError(err));
+      }
+    } finally {
+      authFlowInProgress = false;
+      els.authGoogleBtn.disabled = false;
+    }
+  });
 
   els.authForm.addEventListener("submit", async e => {
     e.preventDefault();
