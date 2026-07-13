@@ -1474,6 +1474,8 @@ async function applySelfMemberSnapshot(doc) {
   if (!isCollabActive() || doc.exists || _handlingRoomRemoval) return;
   _handlingRoomRemoval = true;
   const roomId = state.collabRoomId;
+  captureCurrentCollabDraftsIntoLocalState();
+  const fallbackSnapshot = localCollabWorkspaceSnapshot();
   try {
     // 退出させられた理由（キック／ルーム終了）に応じてメッセージを変える。
     // ルームドキュメント自体はメンバーでなくても読めるので、削除前に
@@ -1486,6 +1488,8 @@ async function applySelfMemberSnapshot(doc) {
         message = "ホストが共同ルームを終了しました。個人メモに戻りました。";
       }
     } catch {}
+    await preserveCollabWorkspaceForPersonal(roomId, fallbackSnapshot)
+      .catch(err => console.warn("[collab] 強制退出時の個人メモ退避に失敗しました", err));
     stopWorkspaceSnapshots();
     clearSavedCollabRoom();
     state.collabRoomId = null;
@@ -1797,9 +1801,66 @@ function mergeRemoteMediaIntoEditor(remoteContent) {
   return changed;
 }
 
+function captureMemoEditorCaret(noteId = state.selectedId) {
+  if (!noteId || !isMemoEditorActive()) return null;
+  if (document.activeElement === els.titleInput) {
+    return {
+      noteId,
+      area: "title",
+      start: els.titleInput.selectionStart ?? 0,
+      end: els.titleInput.selectionEnd ?? els.titleInput.selectionStart ?? 0,
+      direction: els.titleInput.selectionDirection || "none",
+    };
+  }
+  if (els.contentInput.contains(document.activeElement)) {
+    return {
+      noteId,
+      area: "content",
+      offset: getCaretTextOffset(els.contentInput),
+      scrollTop: els.contentInput.scrollTop,
+      windowX: window.scrollX,
+      windowY: window.scrollY,
+    };
+  }
+  return null;
+}
+
+function restoreMemoEditorCaret(caret) {
+  if (!caret || caret.noteId !== state.selectedId || !getSelectedNote()) return;
+
+  if (caret.area === "title" && !els.titleInput.readOnly) {
+    els.titleInput.focus({ preventScroll: true });
+    const len = els.titleInput.value.length;
+    const start = Math.max(0, Math.min(caret.start ?? 0, len));
+    const end = Math.max(start, Math.min(caret.end ?? start, len));
+    els.titleInput.setSelectionRange(start, end, caret.direction || "none");
+    return;
+  }
+
+  if (caret.area !== "content" || els.contentInput.contentEditable === "false") return;
+  els.contentInput.focus({ preventScroll: true });
+  let range = resolveTextOffsetToRange(els.contentInput, caret.offset);
+  if (!range) {
+    range = document.createRange();
+    range.selectNodeContents(els.contentInput);
+    range.collapse(false);
+  }
+  const selection = window.getSelection();
+  selection.removeAllRanges();
+  selection.addRange(range);
+  els.contentInput.scrollTop = caret.scrollTop ?? els.contentInput.scrollTop;
+  if (Number.isFinite(caret.windowX) && Number.isFinite(caret.windowY)) {
+    window.scrollTo(caret.windowX, caret.windowY);
+  }
+  updateMemoFormatUiFromSelection();
+  updateActiveMediaCaretFromSelection();
+  renderCollabCaretFlags();
+}
+
 function applyNotesSnapshot(snap) {
   if (!isCollabActive()) return;
   const previousSelectedId = state.selectedId;
+  const editorCaret = captureMemoEditorCaret(previousSelectedId);
   const preserveEditor = Boolean(
     previousSelectedId &&
     isMemoEditorActive() &&
@@ -1820,6 +1881,7 @@ function applyNotesSnapshot(snap) {
     return;
   }
   renderEditor();
+  restoreMemoEditorCaret(editorCaret);
   updateUndoButton();
 }
 
@@ -1924,25 +1986,121 @@ async function seedCollabRoom(roomRef, seed) {
   }
 }
 
-// ホストが共同作業を抜ける時、共有していたメモとマインドマップ（同期状態を
-// 含む）を個人メモ側へ書き戻す。これをしないと、共同作業中に張った
-// マインドマップとの同期が、個人メモへ戻った時点で失われてしまうため。
-async function harvestCollabRoomIntoPersonalWorkspace() {
-  if (state.collabRoomRole !== "host" || !isCollabActive()) return;
-  try {
-    const [notesSnap, mapsSnap] = await Promise.all([
-      notesCollection().get(),
-      mindMapsCollection().get(),
-    ]);
-    const notes = notesSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-    const mindMaps = mapsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-    const personalNotesRef = db.collection("users").doc(state.uid).collection("notes");
-    const personalMapsRef = db.collection("users").doc(state.uid).collection("mindmaps");
-    if (notes.length > 0) await writeSeedCollection(personalNotesRef, notes);
-    if (mindMaps.length > 0) await writeSeedCollection(personalMapsRef, mindMaps);
-  } catch (err) {
-    console.warn("[collab] 個人メモへの書き戻しに失敗しました", err);
+// 共同作業から外れる時、共有していたメモとマインドマップ（同期状態を含む）を
+// 個人メモ側へ書き戻す。キック後は共有ルームを読めないため、手元の状態も退避に使う。
+function commitActiveMindMapInlineEdit() {
+  const inlineMindMapEdit = els.mindMapNodes?.querySelector(".mindmap-node-edit");
+  if (inlineMindMapEdit && document.activeElement === inlineMindMapEdit) {
+    inlineMindMapEdit.blur();
   }
+}
+
+function captureCurrentCollabDraftsIntoLocalState() {
+  if (!isCollabActive()) return;
+
+  clearTimeout(state.saveTimer);
+  state.saveTimer = null;
+  const note = getSelectedNote();
+  if (note && !_isComposing && !state.isApplyingUndo) {
+    const next = snapshotFromEditor(note.id);
+    if (!snapshotsEqual(snapshotFromNote(note), next)) {
+      const content = String(next.content ?? "");
+      note.title = (String(next.title ?? "").slice(0, 120) || "無題");
+      note.content = content;
+      note.media = pruneOrphanedMedia(note, content);
+      note.updated_at = nowIso();
+    }
+  }
+
+  commitActiveMindMapInlineEdit();
+  clearTimeout(state.mindMapSaveTimer);
+  state.mindMapSaveTimer = null;
+  if (state.mindMap) {
+    state.mindMap.updated_at = nowIso();
+    state.mindMap.selected_node_id = state.mindMapSelectedId;
+  }
+}
+
+function localCollabWorkspaceSnapshot() {
+  const notes = cloneData(getNotes());
+  const mindMapsById = new Map();
+  if (state.mindMap?.id) {
+    const serialized = serializeMindMap();
+    if (serialized?.id) mindMapsById.set(serialized.id, cloneData(serialized));
+  }
+  return {
+    notes,
+    mindMaps: [...mindMapsById.values()],
+  };
+}
+
+function mergeWorkspaceSnapshots(primary, fallback, preferFallbackIds = {}) {
+  const notesById = new Map();
+  const mindMapsById = new Map();
+  const preferredNoteIds = new Set(preferFallbackIds.noteIds || []);
+  const preferredMindMapIds = new Set(preferFallbackIds.mindMapIds || []);
+
+  (primary?.notes || []).forEach(note => {
+    if (note?.id) notesById.set(note.id, note);
+  });
+  (primary?.mindMaps || []).forEach(map => {
+    if (map?.id) mindMapsById.set(map.id, map);
+  });
+
+  (fallback?.notes || []).forEach(note => {
+    if (!note?.id) return;
+    if (!notesById.has(note.id) || preferredNoteIds.has(note.id)) {
+      notesById.set(note.id, note);
+    }
+  });
+  (fallback?.mindMaps || []).forEach(map => {
+    if (!map?.id) return;
+    if (!mindMapsById.has(map.id) || preferredMindMapIds.has(map.id)) {
+      mindMapsById.set(map.id, map);
+    }
+  });
+
+  return {
+    notes: [...notesById.values()],
+    mindMaps: [...mindMapsById.values()],
+  };
+}
+
+async function readCollabWorkspaceSnapshot(roomId) {
+  if (!roomId) return { notes: [], mindMaps: [] };
+  const roomRef = db.collection("collabRooms").doc(roomId);
+  const [notesSnap, mapsSnap] = await Promise.all([
+    roomRef.collection("notes").get(),
+    roomRef.collection("mindmaps").get(),
+  ]);
+  return {
+    notes: notesSnap.docs.map(d => ({ id: d.id, ...d.data() })),
+    mindMaps: mapsSnap.docs.map(d => ({ id: d.id, ...d.data() })),
+  };
+}
+
+async function writeWorkspaceSnapshotToPersonal(snapshot) {
+  if (!state.uid || !snapshot) return;
+  const personalRoot = db.collection("users").doc(state.uid);
+  const notes = Array.isArray(snapshot.notes) ? snapshot.notes.filter(item => item?.id) : [];
+  const mindMaps = Array.isArray(snapshot.mindMaps) ? snapshot.mindMaps.filter(item => item?.id) : [];
+  if (notes.length > 0) await writeSeedCollection(personalRoot.collection("notes"), notes);
+  if (mindMaps.length > 0) await writeSeedCollection(personalRoot.collection("mindmaps"), mindMaps);
+}
+
+async function preserveCollabWorkspaceForPersonal(roomId, fallbackSnapshot = null, options = {}) {
+  if (!roomId || !state.uid) return;
+  let snapshot = null;
+  try {
+    snapshot = await readCollabWorkspaceSnapshot(roomId);
+  } catch (err) {
+    console.warn("[collab] 共有内容の読み取りに失敗したためローカル内容を退避します", err);
+    snapshot = fallbackSnapshot;
+  }
+  const merged = snapshot && fallbackSnapshot
+    ? mergeWorkspaceSnapshots(snapshot, fallbackSnapshot, options.preferFallbackIds)
+    : (snapshot || fallbackSnapshot);
+  await writeWorkspaceSnapshotToPersonal(merged);
 }
 
 function resetWorkspaceViewState() {
@@ -2235,16 +2393,28 @@ async function requestToggleGuestsReadOnly() {
 
 async function leaveCollabRoom(newHostUid = null) {
   if (!isCollabActive()) return;
+  const roomId = state.collabRoomId;
+  const uid = state.uid;
+  commitActiveMindMapInlineEdit();
+  await saveCurrentEditorNow();
+  if (!els.mindMapOverlay.hidden) await closeMindMapPanel();
+  else if (state.mindMap) await saveMindMapNow();
+  const fallbackSnapshot = localCollabWorkspaceSnapshot();
+  await preserveCollabWorkspaceForPersonal(roomId, fallbackSnapshot, {
+    preferFallbackIds: {
+      noteIds: state.selectedId ? [state.selectedId] : [],
+      mindMapIds: state.mindMap?.id ? [state.mindMap.id] : [],
+    },
+  });
   if (state.collabRoomRole === "host") {
     if (newHostUid) await transferCollabHost(newHostUid);
     else await clearCollabHost();
   }
-  await saveCurrentEditorNow();
-  if (!els.mindMapOverlay.hidden) await closeMindMapPanel();
-  else if (state.mindMap) await saveMindMapNow();
-  await harvestCollabRoomIntoPersonalWorkspace();
-  await clearCollabPresence();
+  await clearCollabPresence(roomId, uid);
   stopWorkspaceSnapshots();
+  await db.collection("collabRooms").doc(roomId).collection("members").doc(uid)
+    .delete()
+    .catch(err => console.warn("[collab] member削除に失敗しました", err));
   clearSavedCollabRoom();
   state.collabRoomId = null;
   state.collabRoomLabel = "";
