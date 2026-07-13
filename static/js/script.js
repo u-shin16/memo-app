@@ -2734,6 +2734,12 @@ function getGoogleCredentialFromAuthError(err) {
     || null;
 }
 
+function createGoogleAuthProvider() {
+  const provider = new firebase.auth.GoogleAuthProvider();
+  provider.setCustomParameters({ prompt: "select_account" });
+  return provider;
+}
+
 async function continueAfterGoogleLink(user) {
   if (!user) return;
   await user.reload();
@@ -11593,8 +11599,7 @@ if (auth) {
     authFlowInProgress = true;
     try {
       await applyAuthPersistence();
-      const provider = new firebase.auth.GoogleAuthProvider();
-      await auth.signInWithPopup(provider);
+      await auth.signInWithPopup(createGoogleAuthProvider());
       // ここから先はGoogleのメールが検証済みなので、確認メール待ち画面には行かず
       // onAuthStateChangedが通常のアプリ起動フローへ進める。
     } catch (err) {
