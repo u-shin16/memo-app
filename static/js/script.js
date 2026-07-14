@@ -3824,19 +3824,25 @@ function collectNoteSubtree(rootId) {
   return getNotes().filter(note => isNoteInSubtree(note.id, rootId));
 }
 
-async function ensureNoteAccess(noteId) {
+async function ensureNoteAccess(noteId, { keepLocked = false } = {}) {
   const locks = getClosedNoteLocks(noteId);
   if (locks.length === 0) return true;
   const lock = locks[0];
-  const verified = await requestAccountPassword({
+  const verified = await requestAccountPassword(keepLocked ? {
+    title: "鍵付きメモにメモを追加",
+    message: `「${lock.title || "無題"}」にメモを追加するには、アカウント登録時のパスワードを入力してください。`,
+    submitLabel: "追加",
+  } : {
     title: "鍵付きメモを開く",
     message: `「${lock.title || "無題"}」を開くには、アカウント登録時のパスワードを入力してください。`,
     submitLabel: "開く",
   });
   if (!verified) return false;
-  locks.forEach(item => state.unlockedNoteIds.add(item.id));
-  state.expanded.add(lock.id);
-  renderTree();
+  if (!keepLocked) {
+    locks.forEach(item => state.unlockedNoteIds.add(item.id));
+    state.expanded.add(lock.id);
+    renderTree();
+  }
   return true;
 }
 
@@ -4044,7 +4050,7 @@ async function moveNoteToTreePosition(noteId, parentId, beforeId, options = {}) 
   if (!noteId) return;
   if (blockIfGuestReadOnly()) return;
   if (!await ensureNoteAccess(noteId)) return;
-  if (parentId && !await ensureNoteAccess(parentId)) return;
+  if (parentId && !await ensureNoteAccess(parentId, { keepLocked: true })) return;
   const target = normalizeTreeDropTarget(noteId, parentId, beforeId, options);
   if (isSameTreePosition(noteId, target.parentId, target.beforeId)) return;
 
@@ -5443,7 +5449,6 @@ function renderNode(note, treeCtx) {
     row.classList.remove("drag-target", "drag-before");
     const id = e.dataTransfer.getData("text/plain");
     if (!id || id === note.id) return;
-    if (!await ensureNoteAccess(note.id)) return;
     try {
       if (isBefore) {
         await moveNoteToTreePosition(id, note.parent_id, note.id);
