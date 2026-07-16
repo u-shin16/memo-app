@@ -5803,8 +5803,10 @@ async function openNoteFromTodo(todoId) {
   if (!todo) return;
   if (!await ensureNoteAccess(todo.note_id)) return;
   await saveCurrentEditorNow();
+  getNoteAncestorChain(todo.note_id).forEach(note => state.expanded.add(note.id));
   selectNote(todo.note_id);
   closeNoteTodoPanel();
+  els.tree.querySelector(".tree-row.active")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
 function renderNode(note, treeCtx) {
