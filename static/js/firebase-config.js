@@ -1,6 +1,12 @@
+const defaultFirebaseAuthDomain = "memo-app-9dd98.firebaseapp.com";
+const useCurrentFirebaseAuthDomain =
+  window.location.protocol === "https:" &&
+  !["localhost", "127.0.0.1"].includes(window.location.hostname) &&
+  !window.location.hostname.endsWith(".firebaseapp.com");
+
 const firebaseConfig = {
   apiKey: "AIzaSyDagDgJSe9WWMwYNsb7AhfrB7P_AVlfaZ0",
-  authDomain: "memo-app-9dd98.firebaseapp.com",
+  authDomain: useCurrentFirebaseAuthDomain ? window.location.host : defaultFirebaseAuthDomain,
   projectId: "memo-app-9dd98",
   storageBucket: "memo-app-9dd98.firebasestorage.app",
   messagingSenderId: "999469444865",

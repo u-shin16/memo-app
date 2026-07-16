@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+import urllib.error
+import urllib.request
 import zipfile
 from datetime import datetime, timezone
 from io import BytesIO
@@ -27,6 +29,7 @@ app = Flask(__name__)
 
 SITE_NAME = "まとめときや"
 SITE_URL = "https://matome.webtool-labs.com"
+FIREBASE_AUTH_DOMAIN = "memo-app-9dd98.firebaseapp.com"
 OPERATOR_NAME = "WebTool-Labs"
 OPERATOR_PROFILE_URL = "https://profile.webtool-labs.com/"
 OPERATOR_SITE_URL = "https://webtool-labs.com/"
@@ -444,6 +447,56 @@ def auth_action():
     response = make_response(render_template("auth_action.html"))
     response.headers["Cache-Control"] = "no-store, max-age=0"
     return response
+
+
+def proxy_firebase_helper(path: str) -> Response:
+    query = request.query_string.decode("utf-8")
+    target_url = f"https://{FIREBASE_AUTH_DOMAIN}/{path}"
+    if query:
+        target_url = f"{target_url}?{query}"
+
+    headers = {
+        key: value
+        for key, value in request.headers.items()
+        if key.lower() not in {"host", "content-length", "connection", "accept-encoding"}
+    }
+    data = request.get_data() if request.method not in {"GET", "HEAD"} else None
+    upstream_request = urllib.request.Request(
+        target_url,
+        data=data,
+        headers=headers,
+        method=request.method,
+    )
+
+    try:
+        with urllib.request.urlopen(upstream_request, timeout=15) as upstream:
+            body = upstream.read()
+            response_headers = {
+                key: value
+                for key, value in upstream.headers.items()
+                if key.lower() not in {"connection", "transfer-encoding", "content-encoding", "content-length"}
+            }
+            return Response(body, status=upstream.status, headers=response_headers)
+    except urllib.error.HTTPError as error:
+        body = error.read()
+        response_headers = {
+            key: value
+            for key, value in error.headers.items()
+            if key.lower() not in {"connection", "transfer-encoding", "content-encoding", "content-length"}
+        }
+        return Response(body, status=error.code, headers=response_headers)
+    except urllib.error.URLError as error:
+        return Response(f"Firebase auth helper proxy failed: {error.reason}", status=502)
+
+
+@app.route("/__/auth/<path:auth_path>", methods=["GET", "POST", "HEAD", "OPTIONS"])
+def firebase_auth_helper(auth_path: str):
+    return proxy_firebase_helper(f"__/auth/{auth_path}")
+
+
+@app.route("/__/firebase/init.json", methods=["GET", "HEAD"])
+def firebase_init_json():
+    return proxy_firebase_helper("__/firebase/init.json")
 
 
 # ── SEOページ ─────────────────────────────────────────────────────────────────
