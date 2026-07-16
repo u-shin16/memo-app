@@ -1,0 +1,67 @@
+{% extends "seo_base.html" %}
+
+{% block title %}階層メモ アプリ｜{{ site_name }}{% endblock %}
+{% block description %}やることやアイデアが頭の中でごちゃごちゃになっていませんか。{{ site_name }}は、思いついたことを階層メモとマインドマップで整理できる無料アプリです。AI自動生成や共同編集にも対応しています。{% endblock %}
+
+{% block structured_data %}
+<script type="application/ld+json">{{ webapp_jsonld | tojson }}</script>
+{% endblock %}
+
+{% block header_back %}{% endblock %}
+
+{% block content %}
+<section class="seo-hero">
+  <p class="seo-eyebrow">無料の階層メモ＆マインドマップアプリ</p>
+  <h1>頭の中のごちゃごちゃを、<br>{{ site_name }}でひとつにまとめる。</h1>
+  <p class="seo-hero-lead">
+    やりたいこと、思いついたアイデア、調べたことがバラバラのメモに散らばっていませんか。
+    {{ site_name }}なら、階層メモとマインドマップを行き来しながら、考えを自然な形で整理できます。
+  </p>
+  <a class="seo-hero-cta" href="{{ url_for('index') }}">アプリを使ってみる（無料）</a>
+  <p class="seo-hero-note">登録はメールアドレスまたはGoogleアカウントで数十秒。クレジットカードは不要です。</p>
+</section>
+
+<section class="seo-main">
+  <h2>{{ site_name }}が解決すること</h2>
+  <div class="seo-card-grid">
+    <div class="seo-card">
+      <div class="seo-card-icon" aria-hidden="true">🗂️</div>
+      <h3>親メモをいくつでも作れる階層管理</h3>
+      <p>ジャンルごとに親メモを分け、その下に子メモをどこまでも階層化。テーマが増えても迷子になりません。</p>
+    </div>
+    <div class="seo-card">
+      <div class="seo-card-icon" aria-hidden="true">🧠</div>
+      <h3>メモとマインドマップの双方向同期</h3>
+      <p>文章で書いたメモをマインドマップに変換したり、マインドマップの変更をメモへ反映したり、自由に行き来できます。</p>
+    </div>
+    <div class="seo-card">
+      <div class="seo-card-icon" aria-hidden="true">✨</div>
+      <h3>AIによるメモ・マインドマップ自動生成</h3>
+      <p>テーマを入力するだけで、AIが階層構造のメモやマインドマップのたたき台を作成。ゼロから書く手間を減らせます。</p>
+    </div>
+    <div class="seo-card">
+      <div class="seo-card-icon" aria-hidden="true">🤝</div>
+      <h3>合言葉だけで始められる共同編集</h3>
+      <p>4桁の合言葉を伝えるだけで、家族やチームと同じメモをリアルタイムに編集できます。</p>
+    </div>
+  </div>
+
+  <h2>使い方は3ステップ</h2>
+  <ol class="seo-steps">
+    <li><strong>親メモを作る</strong><span>思いついたテーマやプロジェクト名で、最上位のメモを作成します。</span></li>
+    <li><strong>子メモで階層化する</strong><span>細かい内容を子メモとして追加し、必要ならマインドマップにも変換します。</span></li>
+    <li><strong>必要ならAIや共同編集も使う</strong><span>手が止まったらAI生成、人と一緒に考えたいときは共同編集を使いましょう。</span></li>
+  </ol>
+
+  <h2>よくある質問</h2>
+  <ul class="seo-faq-list">
+    {% for item in faq_items %}
+    <li class="seo-faq-item">
+      <p class="seo-faq-q">{{ item.question }}</p>
+      <p class="seo-faq-a">{{ item.answer }}</p>
+    </li>
+    {% endfor %}
+  </ul>
+  <p><a href="{{ url_for('faq') }}">よくある質問をもっと見る →</a></p>
+</section>
+{% endblock %}

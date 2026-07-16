@@ -1,0 +1,24 @@
+{% extends "seo_base.html" %}
+
+{% block title %}よくある質問｜{{ site_name }}{% endblock %}
+{% block description %}{{ site_name }}の料金・登録・データ保存・共同編集・AI生成・書き出し形式についてのよくある質問と回答をまとめました。{% endblock %}
+
+{% block structured_data %}
+<script type="application/ld+json">{{ faq_jsonld | tojson }}</script>
+{% endblock %}
+
+{% block content %}
+<section class="seo-main">
+  <h1>よくある質問</h1>
+  <p class="seo-lead">{{ site_name }}についてよくいただく質問をまとめました。解決しない場合は<a href="{{ url_for('contact') }}">お問い合わせ</a>からご連絡ください。</p>
+
+  <ul class="seo-faq-list">
+    {% for item in faq_items %}
+    <li class="seo-faq-item">
+      <p class="seo-faq-q">{{ item.question }}</p>
+      <p class="seo-faq-a">{{ item.answer }}</p>
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+{% endblock %}

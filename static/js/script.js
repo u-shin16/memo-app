@@ -14,6 +14,7 @@ const state = {
   templates:          [],
   templatePreviewId:  null,
   mindMapTemplates:   [],
+  todos:              [],
   mindMap:         null,
   mindMapList:     [],
   mindMapLoaded:   false,
@@ -86,6 +87,10 @@ const els = {
   noteListBtn:        document.getElementById("noteListBtn"),
   noteListPanel:      document.getElementById("noteListPanel"),
   noteListItems:      document.getElementById("noteListItems"),
+  noteTodoBtn:        document.getElementById("noteTodoBtn"),
+  noteTodoPanel:      document.getElementById("noteTodoPanel"),
+  noteTodoItems:      document.getElementById("noteTodoItems"),
+  noteTodoCount:      document.getElementById("noteTodoCount"),
   collabStatusBtn:        document.getElementById("collabStatusBtn"),
   collabStatusCount:      document.getElementById("collabStatusCount"),
   mindMapCollabStatusBtn:   document.getElementById("mindMapCollabStatusBtn"),
@@ -139,6 +144,8 @@ const els = {
   mindMapToNoteBtn:  document.getElementById("mindMapToNoteBtn"),
   mindMapDeleteBtn:      document.getElementById("mindMapDeleteBtn"),
   downloadMapPngBtn:     document.getElementById("downloadMapPngBtn"),
+  downloadMapSvgBtn:     document.getElementById("downloadMapSvgBtn"),
+  downloadMapPdfBtn:     document.getElementById("downloadMapPdfBtn"),
   mindMapTemplateBtn:       document.getElementById("mindMapTemplateBtn"),
   mindMapTemplatesPanel:    document.getElementById("mindMapTemplatesPanel"),
   mindMapTemplatesClose:    document.getElementById("mindMapTemplatesClose"),
@@ -260,6 +267,8 @@ const els = {
   memoFormatToggleBtn: document.getElementById("memoFormatToggleBtn"),
   noteToMindMapBtn:      document.getElementById("noteToMindMapBtn"),
   downloadNotesPdfBtn:   document.getElementById("downloadNotesPdfBtn"),
+  downloadNotesTxtBtn:   document.getElementById("downloadNotesTxtBtn"),
+  downloadNotesMdBtn:    document.getElementById("downloadNotesMdBtn"),
   memoFormatBar:    document.getElementById("memoFormatBar"),
   memoTextColorBtn: document.getElementById("memoTextColorBtn"),
   memoTextColorLabel: document.getElementById("memoTextColorLabel"),
@@ -305,9 +314,24 @@ const els = {
   lightboxClose:    document.getElementById("lightboxClose"),
   // Crop
   cropOverlay:      document.getElementById("cropOverlay"),
+  cropTitle:        document.getElementById("cropTitle"),
+  cropHint:         document.getElementById("cropHint"),
   cropCanvas:       document.getElementById("cropCanvas"),
   cropOk:           document.getElementById("cropOk"),
   cropCancel:       document.getElementById("cropCancel"),
+  imageEditPenBtn:  document.getElementById("imageEditPenBtn"),
+  imageEditEraserBtn: document.getElementById("imageEditEraserBtn"),
+  imageEditCropBtn: document.getElementById("imageEditCropBtn"),
+  imageEditUndoBtn: document.getElementById("imageEditUndoBtn"),
+  imageEditRotateLeftBtn: document.getElementById("imageEditRotateLeftBtn"),
+  imageEditRotateRightBtn: document.getElementById("imageEditRotateRightBtn"),
+  imageEditFlipHBtn: document.getElementById("imageEditFlipHBtn"),
+  imageEditFlipVBtn: document.getElementById("imageEditFlipVBtn"),
+  imageEditRestoreBtn: document.getElementById("imageEditRestoreBtn"),
+  imageEditPenSize: document.getElementById("imageEditPenSize"),
+  imageEditPenColorWrap: document.getElementById("imageEditPenColorWrap"),
+  imageEditEraserTypeWrap: document.getElementById("imageEditEraserTypeWrap"),
+  imageEditPenSizeWrap: document.getElementById("imageEditPenSizeWrap"),
   // Auth
   appShell:           document.querySelector(".app-shell"),
   authOverlay:        document.getElementById("authOverlay"),
@@ -364,7 +388,6 @@ if (auth) auth.languageCode = "ja";
 const STORAGE_ENABLED = Boolean(storage && window.firebaseConfig?.storageBucket);
 if (!STORAGE_ENABLED) {
   els.mediaBtn.hidden = true;
-  if (els.mediaTrimBtn) els.mediaTrimBtn.hidden = true;
 }
 
 const COLLAB_STORAGE_KEY_PREFIX = "matometokiya:collab-room:v1:";
@@ -405,9 +428,63 @@ function escapeHtmlAttr(value) {
     .replace(/'/g, "&#39;");
 }
 
-// メモ → PDF（印刷ダイアログ経由）
-function downloadNotesAsPdf() {
-  if (!state.selectedId) { showToast("メモを選択してください。"); return; }
+// ページ遷移せずに印刷ダイアログを開くための共通ヘルパー（非表示iframeを使用）
+function waitForPrintImages(win, timeoutMs = 7000) {
+  const images = [...win.document.images].filter(img => img.src);
+  if (images.length === 0) return Promise.resolve();
+  const waiters = images.map(img => {
+    if (img.complete && img.naturalWidth > 0) return Promise.resolve();
+    return new Promise(resolve => {
+      img.addEventListener("load", resolve, { once: true });
+      img.addEventListener("error", resolve, { once: true });
+    });
+  });
+  return Promise.race([
+    Promise.all(waiters),
+    new Promise(resolve => setTimeout(resolve, timeoutMs)),
+  ]);
+}
+
+function printHtmlInPage(html, { toastMessage } = {}) {
+  const iframe = document.createElement("iframe");
+  iframe.setAttribute("aria-hidden", "true");
+  iframe.style.position = "fixed";
+  iframe.style.right = "0";
+  iframe.style.bottom = "0";
+  iframe.style.width = "1px";
+  iframe.style.height = "1px";
+  iframe.style.border = "0";
+  iframe.style.opacity = "0";
+  iframe.style.pointerEvents = "none";
+  document.body.appendChild(iframe);
+
+  let cleaned = false;
+  const cleanup = () => {
+    if (cleaned) return;
+    cleaned = true;
+    iframe.remove();
+  };
+
+  const win = iframe.contentWindow;
+  win.document.open();
+  win.document.write(html);
+  win.document.close();
+
+  const doPrint = () => {
+    waitForPrintImages(win).then(() => {
+      win.focus();
+      win.print();
+      if (toastMessage) showToast(toastMessage);
+      win.addEventListener("afterprint", cleanup, { once: true });
+      setTimeout(cleanup, 60000);
+    });
+  };
+  if (win.document.readyState === "complete") doPrint();
+  else win.addEventListener("load", doPrint, { once: true });
+}
+
+// エクスポート対象のメモ一覧を取得（編集中の下書きを反映した上で親子関係を返す）
+function prepareNotesForExport() {
   const notes = getNotes();
   const selectedDraft = notes.find(n => n.id === state.selectedId);
   if (selectedDraft && !isNoteAccessLocked(selectedDraft.id)) {
@@ -417,6 +494,13 @@ function downloadNotesAsPdf() {
   const childrenOf = (pid) =>
     notes.filter(n => (n.parent_id ?? null) === (pid ?? null))
       .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  return { notes, childrenOf };
+}
+
+// メモ → PDF（印刷ダイアログ経由・同一ページ内で完結）
+function downloadNotesAsPdf() {
+  if (!state.selectedId) { showToast("メモを選択してください。"); return; }
+  const { notes, childrenOf } = prepareNotesForExport();
 
   // 画像を保持しつつスクリプト等を除去
   function sanitizeForPrint(rawHtml) {
@@ -500,33 +584,6 @@ function downloadNotesAsPdf() {
     return sanitizeForPrint(html).trim();
   }
 
-  function waitForPrintImages(win, timeoutMs = 7000) {
-    const images = [...win.document.images].filter(img => img.src);
-    if (images.length === 0) return Promise.resolve();
-    const waiters = images.map(img => {
-      if (img.complete && img.naturalWidth > 0) return Promise.resolve();
-      return new Promise(resolve => {
-        img.addEventListener("load", resolve, { once: true });
-        img.addEventListener("error", resolve, { once: true });
-      });
-    });
-    return Promise.race([
-      Promise.all(waiters),
-      new Promise(resolve => setTimeout(resolve, timeoutMs)),
-    ]);
-  }
-
-  function printWhenReady(win) {
-    const print = () => {
-      waitForPrintImages(win).then(() => {
-        win.focus();
-        win.print();
-      });
-    };
-    if (win.document.readyState === "complete") print();
-    else win.addEventListener("load", print, { once: true });
-  }
-
   function buildHtml(noteId, numPath) {
     const note = notes.find(n => n.id === noteId);
     if (!note) return "";
@@ -593,20 +650,79 @@ function downloadNotesAsPdf() {
     ${body}
   </body></html>`;
 
-  const win = window.open("", "_blank");
-  if (!win) { showToast("ポップアップがブロックされました。ブラウザの設定を確認してください。"); return; }
-  win.document.write(html);
-  win.document.close();
-  printWhenReady(win);
-  showToast("印刷ダイアログで「PDFに保存」を選択してください。");
+  printHtmlInPage(html, { toastMessage: "印刷ダイアログで「PDFに保存」を選択してください。" });
 }
 
-// マインドマップ → PNG（Canvas描画）
-function downloadMindMapAsPng() {
-  if (!state.mindMap) return;
+function buildNotesExportLabel(note) {
+  const marks = [];
+  if (note.pinned) marks.push("📌");
+  if (note.checked) marks.push("✅");
+  const title = note.title || "無題";
+  return marks.length ? `${title} ${marks.join(" ")}` : title;
+}
+
+// メモ階層 → Markdown文字列
+function buildNotesMarkdown(rootId) {
+  const { notes, childrenOf } = prepareNotesForExport();
+  const HEADING_MAX = 6;
+
+  function walk(noteId, depth) {
+    const note = notes.find(n => n.id === noteId);
+    if (!note) return "";
+    const level = Math.min(depth + 1, HEADING_MAX);
+    let out = `${"#".repeat(level)} ${buildNotesExportLabel(note)}\n`;
+    const body = contentToMarkdown(note.content ?? "");
+    if (body) out += `\n${body}\n`;
+    childrenOf(note.id).forEach(child => { out += `\n${walk(child.id, depth + 1)}`; });
+    return out;
+  }
+
+  return `${walk(rootId, 0).trim()}\n`;
+}
+
+// メモ階層 → プレーンテキスト文字列
+function buildNotesPlainText(rootId) {
+  const { notes, childrenOf } = prepareNotesForExport();
+
+  function walk(noteId, depth) {
+    const note = notes.find(n => n.id === noteId);
+    if (!note) return "";
+    const indent = "  ".repeat(depth);
+    let out = `${indent}■ ${buildNotesExportLabel(note)}\n`;
+    const body = contentToPlainText(note.content ?? "");
+    if (body) out += `${body.split("\n").map(line => `${indent}  ${line}`).join("\n")}\n`;
+    childrenOf(note.id).forEach(child => { out += `\n${walk(child.id, depth + 1)}`; });
+    return out;
+  }
+
+  return `${walk(rootId, 0).trim()}\n`;
+}
+
+// メモ → テキストファイル（同一ページ内でダウンロード）
+function downloadNotesAsTxt() {
+  if (!state.selectedId) { showToast("メモを選択してください。"); return; }
+  const note = getNotes().find(n => n.id === state.selectedId);
+  const text = buildNotesPlainText(state.selectedId);
+  const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+  triggerBlobDownload(blob, `${safeFilename(note?.title)}.txt`);
+  showToast("テキストをダウンロードしました。");
+}
+
+// メモ → Markdownファイル（同一ページ内でダウンロード）
+function downloadNotesAsMarkdown() {
+  if (!state.selectedId) { showToast("メモを選択してください。"); return; }
+  const note = getNotes().find(n => n.id === state.selectedId);
+  const text = buildNotesMarkdown(state.selectedId);
+  const blob = new Blob([text], { type: "text/markdown;charset=utf-8" });
+  triggerBlobDownload(blob, `${safeFilename(note?.title)}.md`);
+  showToast("Markdownをダウンロードしました。");
+}
+
+// マインドマップのレイアウト情報をエクスポート用の座標系にまとめる
+function computeMindMapExportGeometry() {
   const nodes = getMindMapNodes();
   const layout = calculateMindMapLayout();
-  if (layout.size === 0) return;
+  if (layout.size === 0) return null;
 
   const NW = 180, NH = 52, R = 14, PAD = 72;
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -619,8 +735,20 @@ function downloadMindMapAsPng() {
   const ox = -minX + PAD, oy = -minY + PAD;
   const cw = maxX - minX + PAD * 2;
   const ch = maxY - minY + PAD * 2;
+  return { nodes, layout, NW, NH, R, PAD, ox, oy, cw, ch };
+}
 
-  const dpr = 2; // 高解像度
+// ノードタイトルをmaxW(px)に収まるよう省略
+function truncateMindMapTitle(ctx, title, maxW) {
+  let txt = title || "";
+  if (ctx.measureText(txt).width <= maxW) return txt;
+  while (ctx.measureText(txt + "…").width > maxW && txt.length > 0) txt = txt.slice(0, -1);
+  return `${txt}…`;
+}
+
+// マインドマップ → Canvas描画
+function renderMindMapToCanvas(geometry, dpr = 2) {
+  const { nodes, layout, NW, NH, R, ox, oy, cw, ch } = geometry;
   const canvas = document.createElement("canvas");
   canvas.width = cw * dpr;
   canvas.height = ch * dpr;
@@ -697,14 +825,19 @@ function downloadMindMapAsPng() {
       : (isRoot ? "#ffffff" : "#1f2937");
     ctx.fillStyle = textColor;
     ctx.font = `${isRoot ? "bold " : ""}14px system-ui,sans-serif`;
-    const maxW = NW - 24;
-    let txt = node.title || "";
-    if (ctx.measureText(txt).width > maxW) {
-      while (ctx.measureText(txt + "…").width > maxW && txt.length > 0) txt = txt.slice(0, -1);
-      txt += "…";
-    }
+    const txt = truncateMindMapTitle(ctx, node.title || "", NW - 24);
     ctx.fillText(txt, p.x + ox, p.y + oy);
   }
+
+  return canvas;
+}
+
+// マインドマップ → PNG（Canvas描画・同一ページ内でダウンロード）
+function downloadMindMapAsPng() {
+  if (!state.mindMap) return;
+  const geometry = computeMindMapExportGeometry();
+  if (!geometry) return;
+  const canvas = renderMindMapToCanvas(geometry);
 
   canvas.toBlob(blob => {
     if (!blob) { showToast("PNG生成に失敗しました。"); return; }
@@ -712,6 +845,81 @@ function downloadMindMapAsPng() {
     triggerBlobDownload(blob, `${name}.png`);
     showToast("PNGをダウンロードしました。");
   }, "image/png");
+}
+
+// マインドマップ → SVG文字列
+function buildMindMapSvg(geometry) {
+  const { nodes, layout, NW, NH, R, ox, oy, cw, ch } = geometry;
+  const measureCanvas = document.createElement("canvas");
+  const measureCtx = measureCanvas.getContext("2d");
+
+  let linksSvg = "";
+  for (const node of nodes) {
+    if (!node.parent_id) continue;
+    const p = layout.get(node.parent_id);
+    const c = layout.get(node.id);
+    if (!p || !c) continue;
+    const stroke = node.link_color || "#94a3b8";
+    const x1 = p.x + ox + NW / 2, y1 = p.y + oy;
+    const x2 = c.x + ox - NW / 2, y2 = c.y + oy;
+    const mx = (x1 + x2) / 2;
+    linksSvg += `<path d="M ${x1} ${y1} C ${mx} ${y1} ${mx} ${y2} ${x2} ${y2}" stroke="${escapeHtmlAttr(stroke)}" stroke-width="2" fill="none"/>\n`;
+  }
+
+  let nodesSvg = "";
+  for (const node of nodes) {
+    const p = layout.get(node.id);
+    if (!p) continue;
+    const nx = p.x + ox - NW / 2, ny = p.y + oy - NH / 2;
+    const isRoot = node.parent_id === null;
+    const fill = node.fill_color || (isRoot ? "#2563eb" : "#ffffff");
+    const border = node.border_color || (isRoot ? "#2563eb" : "#e2e8f0");
+    const textColor = node.fill_color ? "#1f2937" : (isRoot ? "#ffffff" : "#1f2937");
+    measureCtx.font = `${isRoot ? "bold " : ""}14px system-ui,sans-serif`;
+    const txt = truncateMindMapTitle(measureCtx, node.title || "", NW - 24);
+    nodesSvg += `<g>
+      <rect x="${nx}" y="${ny}" width="${NW}" height="${NH}" rx="${R}" ry="${R}" fill="${escapeHtmlAttr(fill)}" stroke="${escapeHtmlAttr(border)}" stroke-width="1.5"/>
+      <text x="${p.x + ox}" y="${p.y + oy}" text-anchor="middle" dominant-baseline="middle" font-family="system-ui,sans-serif" font-size="14" font-weight="${isRoot ? "bold" : "normal"}" fill="${escapeHtmlAttr(textColor)}">${escapeHtml(txt)}</text>
+    </g>\n`;
+  }
+
+  return `<?xml version="1.0" encoding="UTF-8"?>\n` +
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${cw}" height="${ch}" viewBox="0 0 ${cw} ${ch}">\n` +
+    `<rect x="0" y="0" width="${cw}" height="${ch}" fill="#f8fafc"/>\n${linksSvg}${nodesSvg}</svg>`;
+}
+
+// マインドマップ → SVG（同一ページ内でダウンロード）
+function downloadMindMapAsSvg() {
+  if (!state.mindMap) return;
+  const geometry = computeMindMapExportGeometry();
+  if (!geometry) return;
+  const svg = buildMindMapSvg(geometry);
+  const blob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
+  const name = safeFilename(state.mindMap?.title);
+  triggerBlobDownload(blob, `${name}.svg`);
+  showToast("SVGをダウンロードしました。");
+}
+
+// マインドマップ → PDF（SVGを印刷ダイアログ経由で保存・同一ページ内で完結）
+function downloadMindMapAsPdf() {
+  if (!state.mindMap) return;
+  const geometry = computeMindMapExportGeometry();
+  if (!geometry) return;
+  const svg = buildMindMapSvg(geometry);
+  const pageTitle = state.mindMap?.title || "マインドマップ";
+  const escaped = escapeHtml(pageTitle);
+  const landscape = geometry.cw >= geometry.ch;
+
+  const html = `<!DOCTYPE html><html lang="ja"><head><meta charset="utf-8">
+    <title>${escaped}</title>
+    <style>
+      @page { margin: 10mm; size: A4 ${landscape ? "landscape" : "portrait"}; }
+      body { margin: 0; padding: 0; }
+      svg { width: 100%; height: auto; display: block; }
+    </style>
+  </head><body>${svg}</body></html>`;
+
+  printHtmlInPage(html, { toastMessage: "印刷ダイアログで「PDFに保存」を選択してください。" });
 }
 
 // ── /ダウンロードユーティリティ ────────────────────────────
@@ -739,6 +947,7 @@ function setMobileMenuOpen(open) {
   const shouldOpen = Boolean(open) && isMobileMenuLayout();
   if (shouldOpen) {
     closeNoteListPanel();
+    closeNoteTodoPanel();
     closeMemoFormatPanel();
     closeMemoSettingsPanel();
   }
@@ -1641,6 +1850,7 @@ function openCollabStatusPanel(anchorBtn) {
   closeMemoFormatPanel();
   closeMemoSettingsPanel();
   closeNoteListPanel();
+  closeNoteTodoPanel();
   collabStatusAnchorBtn = anchorBtn || els.collabStatusBtn;
   setCollabStatusHostMenuOpen(false);
   renderCollabStatusPanel();
@@ -2496,14 +2706,17 @@ async function loadSignedInWorkspace(user) {
     state.collabRoomId = null;
     state.collabRoomLabel = "";
     state.collabRoomRole = null;
+    state.todos = [];
     resetMindMapState();
   }
   state.uid = user.uid;
   await restoreSavedCollabRoom(user.uid);
-  [state.templates, state.mindMapTemplates] = await Promise.all([
+  [state.templates, state.mindMapTemplates, state.todos] = await Promise.all([
     ensureOfficialTemplates(user.uid),
     ensureOfficialMindMapTemplates(user.uid),
+    loadTodos(),
   ]);
+  updateTodoButton();
   await reloadCurrentWorkspace();
 }
 
@@ -2511,6 +2724,7 @@ function openAppManagement(anchor) {
   closeMemoSettingsPanel();
   closeMemoFormatPanel();
   closeNoteListPanel();
+  closeNoteTodoPanel();
   closeMindMapSettingsPanel();
   closeMindMapNodeSettingsPanel();
   closeMindMapListPanel();
@@ -3080,6 +3294,15 @@ function templatesCollection() {
 
 function mindMapTemplatesCollection() {
   return db.collection("users").doc(state.uid).collection("mindMapTemplates");
+}
+
+function todosCollection() {
+  return db.collection("users").doc(state.uid).collection("todos");
+}
+
+async function loadTodos() {
+  const snap = await todosCollection().get();
+  return snap.docs.map(doc => ({ ...doc.data(), id: doc.id }));
 }
 
 function mindMapsCollection() {
@@ -4373,6 +4596,50 @@ function contentToPlainText(content) {
     .trim();
 }
 
+// 見出し・小見出し・取り消し線・画像などをMarkdown記法に変換
+function contentToMarkdown(content) {
+  const raw = String(content ?? "");
+  if (!raw) return "";
+
+  const html = /<\/?[a-z][^>]*>/i.test(raw) ? raw : contentToHtml(raw);
+  const holder = document.createElement("div");
+  holder.innerHTML = html;
+
+  holder.querySelectorAll(".memo-text-strike").forEach(el => {
+    if (!el.textContent.trim()) return;
+    el.prepend(document.createTextNode("~~"));
+    el.append(document.createTextNode("~~"));
+  });
+  holder.querySelectorAll(".memo-text-heading, .memo-text-subheading").forEach(el => {
+    const prefix = el.classList.contains("memo-text-heading") ? "# " : "## ";
+    el.prepend(document.createTextNode(prefix));
+  });
+  holder.querySelectorAll("img").forEach(img => {
+    const alt = (img.getAttribute("alt") || "画像").trim();
+    const src = img.getAttribute("src") || "";
+    img.replaceWith(document.createTextNode(src ? `![${alt}](${src})` : ""));
+  });
+  holder.querySelectorAll("video").forEach(video => {
+    const src = video.getAttribute("src") || "";
+    video.replaceWith(document.createTextNode(src ? `[動画](${src})` : ""));
+  });
+
+  const textHolder = document.createElement("div");
+  textHolder.innerHTML = holder.innerHTML
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(div|p|li|h[1-6]|blockquote|pre|section|article|tr)>/gi, "\n")
+    .replace(/<\/(td|th)>/gi, "\t");
+
+  return textHolder.textContent
+    .replace(/\u00a0/g, " ")
+    .replace(/\u200b/g, "")
+    .replace(/\r\n?/g, "\n")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n[ \t]+/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 function getContentHtml() { return els.contentInput.innerHTML ?? ""; }
 
 function insertFragmentAtMemoSelection(fragment) {
@@ -4677,6 +4944,7 @@ function setMemoFormatPanelOpen(open) {
   if (open) {
     closeMemoSettingsPanel();
     closeNoteListPanel();
+    closeNoteTodoPanel();
   }
   els.memoFormatBar.hidden = !open;
   els.memoFormatToggleBtn.classList.toggle("active", open);
@@ -4702,6 +4970,7 @@ function openMemoSettingsPanel() {
   if (!els.memoSettingsPanel || !els.memoSettingsBtn) return;
   closeMemoFormatPanel();
   closeNoteListPanel();
+  closeNoteTodoPanel();
   hideCtxMenu();
   hideMediaCtxMenu();
   if (els.accountMenu) els.accountMenu.hidden = true;
@@ -5227,6 +5496,7 @@ function openNoteListPanel() {
   if (!els.noteListPanel) return;
   closeMemoFormatPanel();
   closeMemoSettingsPanel();
+  closeNoteTodoPanel();
   renderNoteList();
   els.noteListPanel.hidden = false;
   updateNoteListButton(true);
@@ -5306,6 +5576,235 @@ async function deleteRootNoteFromList(noteId) {
   selectNote(noteId);
   closeNoteListPanel();
   await deleteSelectedNote();
+}
+
+// ── TODOリスト ────────────────────────────────────────────────────────────────
+
+function updateTodoButton() {
+  if (!els.noteTodoCount) return;
+  const pending = state.todos.filter(todo => !todo.done).length;
+  els.noteTodoCount.textContent = String(pending);
+  els.noteTodoCount.hidden = pending === 0;
+}
+
+function getTodoNote(todo) {
+  return getNotes().find(note => note.id === todo.note_id) ?? null;
+}
+
+function noteHierarchySortKey(note) {
+  if (!note) return "";
+  const notes = getNotes();
+  return getNoteAncestorChain(note.id).map(item => {
+    const parentId = item.parent_id ?? null;
+    const siblings = orderTreeChildren(
+      parentId,
+      notes.filter(candidate => (candidate.parent_id ?? null) === parentId),
+    );
+    const index = siblings.findIndex(candidate => candidate.id === item.id);
+    const order = String(index >= 0 ? index : 9999).padStart(4, "0");
+    return `${order}:${String(item.title || "無題").toLowerCase()}:${item.id}`;
+  }).join("/");
+}
+
+function getTodoDisplayContext(todo) {
+  const note = getTodoNote(todo);
+  if (!note) {
+    const label = `${todo.title || "無題"}（削除済み）`;
+    return {
+      note,
+      label,
+      depth: 0,
+      breadcrumb: "元メモは削除済み",
+      fullPath: label,
+    };
+  }
+
+  const chain = getNoteAncestorChain(note.id);
+  const titles = chain.map(item => item.title || "無題");
+  const parents = titles.slice(0, -1);
+  return {
+    note,
+    label: note.title || "無題",
+    depth: Math.max(0, chain.length - 1),
+    breadcrumb: parents.length ? parents.join(" › ") : "最上位メモ",
+    fullPath: titles.join(" › "),
+  };
+}
+
+function sortedTodos() {
+  return [...state.todos].sort((a, b) => {
+    const noteA = getTodoNote(a);
+    const noteB = getTodoNote(b);
+    if (noteA && noteB) {
+      const hierarchyDiff = noteHierarchySortKey(noteA).localeCompare(noteHierarchySortKey(noteB), "ja");
+      if (hierarchyDiff !== 0) return hierarchyDiff;
+    } else if (noteA || noteB) {
+      return noteA ? -1 : 1;
+    }
+    return String(b.created_at ?? "").localeCompare(String(a.created_at ?? ""));
+  });
+}
+
+function renderTodoList() {
+  if (!els.noteTodoItems) return;
+  els.noteTodoItems.innerHTML = "";
+  const todos = sortedTodos();
+
+  if (todos.length === 0) {
+    const empty = document.createElement("li");
+    empty.className = "note-list-empty";
+    empty.textContent = "TODOはまだありません。メモを右クリックして「TODOに追加」を選んでください。";
+    els.noteTodoItems.appendChild(empty);
+    updateTodoButton();
+    return;
+  }
+
+  todos.forEach(todo => {
+    const { note, label, depth, breadcrumb, fullPath } = getTodoDisplayContext(todo);
+
+    const item = document.createElement("li");
+    item.className = `mindmap-list-item todo-list-item${todo.done ? " is-done" : ""}`;
+    item.classList.toggle("has-parent", depth > 0);
+    item.dataset.id = todo.id;
+
+    const openBtn = document.createElement("button");
+    openBtn.type = "button";
+    openBtn.className = "mindmap-list-open";
+    openBtn.dataset.action = "toggle";
+    openBtn.title = fullPath;
+
+    const titleLine = document.createElement("span");
+    titleLine.className = "mindmap-list-title-line";
+
+    const checkbox = document.createElement("span");
+    checkbox.className = "todo-checkbox";
+    checkbox.setAttribute("aria-hidden", "true");
+    checkbox.textContent = todo.done ? "☑" : "☐";
+    titleLine.appendChild(checkbox);
+
+    const title = document.createElement("span");
+    title.className = "mindmap-list-title";
+    title.textContent = label;
+    titleLine.appendChild(title);
+    openBtn.appendChild(titleLine);
+
+    const hierarchy = document.createElement("span");
+    hierarchy.className = "todo-hierarchy";
+    hierarchy.textContent = breadcrumb;
+    hierarchy.title = fullPath;
+    openBtn.appendChild(hierarchy);
+    item.appendChild(openBtn);
+
+    const actions = document.createElement("div");
+    actions.className = "mindmap-list-actions";
+
+    const openNoteBtn = document.createElement("button");
+    openNoteBtn.type = "button";
+    openNoteBtn.className = "mindmap-list-icon-btn";
+    openNoteBtn.dataset.action = "open-note";
+    openNoteBtn.title = "メモを開く";
+    openNoteBtn.setAttribute("aria-label", `「${label}」のメモを開く`);
+    openNoteBtn.textContent = "↗";
+    openNoteBtn.disabled = !note;
+    actions.appendChild(openNoteBtn);
+
+    const deleteBtn = document.createElement("button");
+    deleteBtn.type = "button";
+    deleteBtn.className = "mindmap-list-icon-btn danger";
+    deleteBtn.dataset.action = "delete";
+    deleteBtn.title = "TODOから削除";
+    deleteBtn.setAttribute("aria-label", `「${label}」をTODOから削除`);
+    deleteBtn.textContent = "🗑";
+    actions.appendChild(deleteBtn);
+
+    item.appendChild(actions);
+    els.noteTodoItems.appendChild(item);
+  });
+
+  updateTodoButton();
+}
+
+function positionNoteTodoPanel() {
+  if (!els.noteTodoPanel || !els.noteTodoBtn || els.noteTodoPanel.hidden) return;
+  const rect = els.noteTodoBtn.getBoundingClientRect();
+  const edge = 8;
+  const width = els.noteTodoPanel.offsetWidth;
+  const left = Math.max(edge, Math.min(rect.left, window.innerWidth - width - edge));
+  els.noteTodoPanel.style.top = `${rect.bottom + 6}px`;
+  els.noteTodoPanel.style.left = `${left}px`;
+  els.noteTodoPanel.style.right = "auto";
+}
+
+function updateNoteTodoButton(open) {
+  const isOpen = Boolean(open);
+  els.noteTodoBtn?.setAttribute("aria-expanded", String(isOpen));
+  els.noteTodoBtn?.setAttribute("aria-label", isOpen ? "TODOリストを閉じる" : "TODOリストを開く");
+  if (els.noteTodoBtn) els.noteTodoBtn.title = isOpen ? "TODOリストを閉じる" : "TODOリストを開く";
+}
+
+function openNoteTodoPanel() {
+  if (!els.noteTodoPanel) return;
+  closeMemoFormatPanel();
+  closeMemoSettingsPanel();
+  closeNoteListPanel();
+  renderTodoList();
+  els.noteTodoPanel.hidden = false;
+  updateNoteTodoButton(true);
+  positionNoteTodoPanel();
+}
+
+function closeNoteTodoPanel() {
+  if (!els.noteTodoPanel) return;
+  els.noteTodoPanel.hidden = true;
+  updateNoteTodoButton(false);
+}
+
+async function addNoteToTodoList(noteId) {
+  if (blockIfGuestReadOnly()) return;
+  const note = getNotes().find(n => n.id === noteId);
+  if (!note) return;
+  try {
+    const todo = {
+      id:         makeId(),
+      note_id:    noteId,
+      title:      note.title || "無題",
+      done:       false,
+      created_at: nowIso(),
+    };
+    await todosCollection().doc(todo.id).set(todo);
+    state.todos.push(todo);
+    if (!els.noteTodoPanel?.hidden) renderTodoList();
+    updateTodoButton();
+    showToast("TODOに追加しました。");
+  } catch (e) { showToast(e.message); }
+}
+
+async function toggleTodoDone(todoId) {
+  const todo = state.todos.find(t => t.id === todoId);
+  if (!todo) return;
+  try {
+    const done = !todo.done;
+    await todosCollection().doc(todoId).set({ done }, { merge: true });
+    todo.done = done;
+    renderTodoList();
+  } catch (e) { showToast(e.message); }
+}
+
+async function deleteTodo(todoId) {
+  try {
+    await todosCollection().doc(todoId).delete();
+    state.todos = state.todos.filter(t => t.id !== todoId);
+    renderTodoList();
+  } catch (e) { showToast(e.message); }
+}
+
+async function openNoteFromTodo(todoId) {
+  const todo = state.todos.find(t => t.id === todoId);
+  if (!todo) return;
+  if (!await ensureNoteAccess(todo.note_id)) return;
+  await saveCurrentEditorNow();
+  selectNote(todo.note_id);
+  closeNoteTodoPanel();
 }
 
 function renderNode(note, treeCtx) {
@@ -5552,14 +6051,14 @@ function renderEditor() {
   // 旧 media 配列 → インライン figure に変換（一度 content に書き込まれるとスキップ）
   for (const item of (note.media ?? [])) {
     if (!item.downloadURL || html.includes(item.downloadURL)) continue;
-    const url     = item.downloadURL;
+    const url     = escapeHtmlAttr(item.downloadURL);
     const isVideo = (item.mime_type || "").startsWith("video/") ||
                     /\.(mp4|mov|avi|webm|m4v|mkv)$/i.test(item.filename || "");
-    const alt     = (item.original_name || "").replace(/"/g, "&quot;");
+    const alt     = escapeHtmlAttr(item.original_name || "");
     html += isVideo
       ? `<figure class="inline-media-figure" contenteditable="false" draggable="false">` +
         `<video src="${url}" class="inline-media" controls preload="metadata" draggable="false"></video></figure>`
-      : `<figure class="inline-media-figure" contenteditable="false" draggable="false">` +
+      : `<figure class="inline-media-figure" contenteditable="false" draggable="false" data-original-src="${url}" data-original-alt="${alt}">` +
         `<img src="${url}" alt="${alt}" class="inline-media" draggable="false"></figure>`;
   }
 
@@ -9492,6 +9991,8 @@ els.mindMapDeleteBtn?.addEventListener("click", async () => {
   if (state.mindMap?.id) await deleteMindMap(state.mindMap.id);
 });
 els.downloadMapPngBtn?.addEventListener("click", () => { closeMindMapSettingsPanel(); downloadMindMapAsPng(); });
+els.downloadMapSvgBtn?.addEventListener("click", () => { closeMindMapSettingsPanel(); downloadMindMapAsSvg(); });
+els.downloadMapPdfBtn?.addEventListener("click", () => { closeMindMapSettingsPanel(); downloadMindMapAsPdf(); });
 els.mindMapLargeBtn?.addEventListener("click", toggleMindMapLargeView);
 els.mindMapSideNewBtn?.addEventListener("click", createNewMindMap);
 els.mindMapListBtn.addEventListener("click", () => {
@@ -9753,7 +10254,11 @@ function replaceMediaElementSource(figure, item) {
   if (!media) return false;
   media.addEventListener(media.tagName === "VIDEO" ? "loadedmetadata" : "load", () => scheduleMediaCaretSync(), { once: true });
   media.src = item.downloadURL;
-  if (media.tagName === "IMG") media.alt = item.original_name;
+  if (media.tagName === "IMG") {
+    media.alt = item.original_name;
+    figure.dataset.originalSrc = item.downloadURL;
+    figure.dataset.originalAlt = item.original_name || "";
+  }
   return true;
 }
 
@@ -10245,6 +10750,10 @@ function insertMediaElement(item) {
   figure.className       = "inline-media-figure";
   figure.contentEditable = "false";
   figure.draggable       = false;
+  if (!isVideo) {
+    figure.dataset.originalSrc = url;
+    figure.dataset.originalAlt = item.original_name || "";
+  }
 
   const mediaEl = document.createElement(isVideo ? "video" : "img");
   mediaEl.src       = url;
@@ -10310,7 +10819,7 @@ els.lightboxOverlay.addEventListener("click", e => {
 });
 els.lightboxClose.addEventListener("click", closeLightbox);
 
-// ── トリミングモーダル ─────────────────────────────────────────────────────────
+// ── 画像編集モーダル ─────────────────────────────────────────────────────────
 
 const HANDLE_HIT  = 16;
 const HANDLE_SIZE = 10;
@@ -10319,9 +10828,20 @@ const _crop = {
   figure:    null,
   imgEl:     null,   // DOM <img>（src 更新用）
   canvasImg: null,   // キャンバス描画用の Image オブジェクト
+  editCanvas: null,  // 画像本体
+  inkCanvas:  null,  // ペンで描いた線
+  inkStrokes: [],    // 一筆ごとのペン線
+  currentStroke: null,
+  mode:      "pen",
   scale:     1,
   rect:      { x: 0, y: 0, w: 100, h: 100 },
   drag:      null,   // { type, startX, startY, initRect }
+  lastPoint: null,
+  brushPreviewPoint: null,
+  history:   [],
+  penColor: "#ef4444",
+  penSize:  8,
+  eraserType: "pixel",
   ready:     false,
   confirming: false,
   sessionId: 0,
@@ -10333,6 +10853,147 @@ function updateCropConfirmState() {
   els.cropOk.textContent = _crop.confirming
     ? "処理中..."
     : (_crop.ready ? "確定" : "読み込み中...");
+
+  if (els.cropTitle) els.cropTitle.textContent = "画像編集";
+  if (els.cropHint) {
+    els.cropHint.textContent = _crop.mode === "crop"
+      ? "ドラッグで範囲選択 / Enter または 確定でトリミング"
+      : _crop.mode === "eraser"
+        ? (_crop.eraserType === "object"
+          ? "オブジェクト消しゴムで触れた一筆をまとめて消せます"
+          : "消しゴムでペンの線だけ消せます")
+        : "ペンで画像に直接書き込めます";
+  }
+
+  const modeButtons = [
+    [els.imageEditPenBtn, "pen"],
+    [els.imageEditEraserBtn, "eraser"],
+    [els.imageEditCropBtn, "crop"],
+  ];
+  modeButtons.forEach(([button, mode]) => {
+    if (!button) return;
+    const active = _crop.mode === mode;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+    button.disabled = !_crop.ready || _crop.confirming;
+  });
+
+  [
+    els.imageEditRotateLeftBtn,
+    els.imageEditRotateRightBtn,
+    els.imageEditFlipHBtn,
+    els.imageEditFlipVBtn,
+  ].forEach(button => {
+    if (button) button.disabled = !_crop.ready || _crop.confirming;
+  });
+  if (els.imageEditUndoBtn) {
+    els.imageEditUndoBtn.disabled = !_crop.ready || _crop.confirming || _crop.history.length === 0;
+  }
+
+  const canRestore = Boolean(_crop.figure?.dataset?.originalSrc);
+  if (els.imageEditRestoreBtn) {
+    els.imageEditRestoreBtn.hidden = !canRestore;
+    els.imageEditRestoreBtn.disabled = !_crop.ready || _crop.confirming || !canRestore;
+  }
+
+  const isBrushMode = _crop.mode === "pen" || _crop.mode === "eraser";
+  if (els.imageEditPenColorWrap) els.imageEditPenColorWrap.hidden = _crop.mode !== "pen";
+  if (els.imageEditEraserTypeWrap) {
+    els.imageEditEraserTypeWrap.hidden = _crop.mode !== "eraser";
+    els.imageEditEraserTypeWrap.querySelectorAll("[data-eraser-type]").forEach(button => {
+      const active = button.dataset.eraserType === _crop.eraserType;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-pressed", String(active));
+      button.disabled = !_crop.ready || _crop.confirming;
+    });
+  }
+  if (els.imageEditPenSizeWrap) els.imageEditPenSizeWrap.hidden = !isBrushMode;
+  updateImageEditColorSwatches();
+}
+
+function mediaSrcForStorage(imgEl) {
+  return imgEl?.currentSrc || imgEl?.src || imgEl?.getAttribute?.("src") || "";
+}
+
+function rememberOriginalImageSource(figure, imgEl) {
+  if (!figure || !imgEl || figure.dataset.originalSrc) return;
+  figure.dataset.originalSrc = mediaSrcForStorage(imgEl);
+  figure.dataset.originalAlt = imgEl.alt || "";
+}
+
+function setImageEditMode(mode) {
+  _crop.mode = mode === "crop" || mode === "eraser" ? mode : "pen";
+  _crop.drag = null;
+  _crop.lastPoint = null;
+  _crop.brushPreviewPoint = null;
+  updateCropConfirmState();
+  drawCropCanvas();
+}
+
+function updateImageEditColorSwatches() {
+  els.imageEditPenColorWrap?.querySelectorAll("[data-pen-color]").forEach(button => {
+    const active = button.dataset.penColor?.toLowerCase() === _crop.penColor.toLowerCase();
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
+}
+
+function setImageEditPenColor(color) {
+  if (!/^#[0-9a-f]{6}$/i.test(color || "")) return;
+  _crop.penColor = color;
+  updateImageEditColorSwatches();
+}
+
+function setImageEditEraserType(type) {
+  _crop.eraserType = type === "object" ? "object" : "pixel";
+  if (_crop.eraserType !== "pixel") _crop.brushPreviewPoint = null;
+  updateCropConfirmState();
+  drawCropCanvas();
+}
+
+function cloneImageEditCanvas(canvas = _crop.editCanvas) {
+  if (!canvas) return null;
+  const clone = document.createElement("canvas");
+  clone.width = canvas.width;
+  clone.height = canvas.height;
+  clone.getContext("2d").drawImage(canvas, 0, 0);
+  return clone;
+}
+
+function cloneImageEditStrokes(strokes = _crop.inkStrokes) {
+  return (strokes || []).map(stroke => ({
+    canvas: cloneImageEditCanvas(stroke.canvas),
+  })).filter(stroke => stroke.canvas);
+}
+
+function createBlankImageEditInkCanvas(width, height) {
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  return canvas;
+}
+
+function pushImageEditHistory() {
+  if (!_crop.editCanvas) return;
+  const snapshot = {
+    editCanvas: cloneImageEditCanvas(_crop.editCanvas),
+    inkCanvas: cloneImageEditCanvas(_crop.inkCanvas),
+    inkStrokes: cloneImageEditStrokes(),
+    rect: { ..._crop.rect },
+  };
+  _crop.history.push(snapshot);
+  if (_crop.history.length > 30) _crop.history.shift();
+  updateCropConfirmState();
+}
+
+function undoImageEditStep() {
+  const snapshot = _crop.history.pop();
+  if (!snapshot || _crop.confirming) {
+    updateCropConfirmState();
+    return;
+  }
+  replaceImageEditCanvas(snapshot.editCanvas, snapshot.inkCanvas, snapshot.rect, snapshot.inkStrokes);
+  updateCropConfirmState();
 }
 
 function _cropClientToCanvas(e) {
@@ -10356,6 +11017,16 @@ function _cropHitType(px, py) {
   return "new";
 }
 
+function _cropIsFullSelection() {
+  const W = els.cropCanvas.width;
+  const H = els.cropCanvas.height;
+  const { x, y, w, h } = _crop.rect;
+  return Math.abs(x) < 1 &&
+    Math.abs(y) < 1 &&
+    Math.abs(w - W) < 1 &&
+    Math.abs(h - H) < 1;
+}
+
 function _cropClamp({ x, y, w, h }) {
   const W = els.cropCanvas.width, H = els.cropCanvas.height;
   x = Math.max(0, x); y = Math.max(0, y);
@@ -10365,15 +11036,58 @@ function _cropClamp({ x, y, w, h }) {
   return { x, y, w, h };
 }
 
+function getImageEditCanvasScale() {
+  const rect = els.cropCanvas.getBoundingClientRect();
+  return els.cropCanvas.width / Math.max(1, rect.width || els.cropCanvas.width);
+}
+
+function fitImageEditCanvasToViewport() {
+  const canvas = els.cropCanvas;
+  const wrap = canvas?.parentElement;
+  if (!canvas || !wrap || !canvas.width || !canvas.height || els.cropOverlay?.hidden) return;
+
+  const maxW = wrap.clientWidth;
+  const maxH = wrap.clientHeight;
+  if (!maxW || !maxH) return;
+
+  const scale = Math.min(maxW / canvas.width, maxH / canvas.height);
+  canvas.style.width = `${Math.max(1, Math.floor(canvas.width * scale))}px`;
+  canvas.style.height = `${Math.max(1, Math.floor(canvas.height * scale))}px`;
+}
+
+function drawImageEditEraserPreview(ctx) {
+  if (_crop.mode !== "eraser" || _crop.eraserType !== "pixel" || !_crop.brushPreviewPoint) return;
+  const radius = Math.max(1, getImageEditPenWidth() / 2);
+  const lineWidth = Math.max(1, 2 * getImageEditCanvasScale());
+  const { x, y } = _crop.brushPreviewPoint;
+
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.beginPath();
+  ctx.arc(x, y, radius, 0, Math.PI * 2);
+  ctx.fillStyle = "rgba(255, 255, 255, 0.18)";
+  ctx.fill();
+  ctx.lineWidth = lineWidth;
+  ctx.strokeStyle = "rgba(15, 23, 42, 0.78)";
+  ctx.stroke();
+  ctx.setLineDash([lineWidth * 2.5, lineWidth * 2]);
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.92)";
+  ctx.stroke();
+  ctx.restore();
+}
+
 function drawCropCanvas() {
   const canvas = els.cropCanvas;
   const ctx    = canvas.getContext("2d");
   const W = canvas.width, H = canvas.height;
-  const img = _crop.canvasImg;   // 専用 Image オブジェクトを使用
+  const img = _crop.editCanvas || _crop.canvasImg;   // 専用 Image / 編集キャンバスを使用
   if (!img) return;
 
   ctx.clearRect(0, 0, W, H);
   ctx.drawImage(img, 0, 0, W, H);
+  if (_crop.inkCanvas) ctx.drawImage(_crop.inkCanvas, 0, 0, W, H);
+  drawImageEditEraserPreview(ctx);
+  if (_crop.mode !== "crop") return;
 
   const { x, y, w, h } = _crop.rect;
 
@@ -10420,13 +11134,87 @@ function drawCropCanvas() {
   ctx.shadowBlur = 0;
 }
 
-function openCropModal(figure) {
+function loadImageForEditorSource(src) {
+  const fetchOptions = /^https?:/i.test(src) ? { cache: "no-store" } : {};
+  return fetch(src, fetchOptions)
+    .then(r => r.blob())
+    .then(blob => {
+      if (blob.size === 0) throw new Error("画像データが空です");
+      return new Promise((resolve, reject) => {
+        const objUrl = URL.createObjectURL(blob);
+        const img    = new Image();
+        img.onload  = () => { URL.revokeObjectURL(objUrl); resolve(img); };
+        img.onerror = () => { URL.revokeObjectURL(objUrl); reject(new Error("デコード失敗")); };
+        img.src = objUrl;
+      });
+    });
+}
+
+function canvasFromImageSource(source) {
+  const width = source.naturalWidth || source.width;
+  const height = source.naturalHeight || source.height;
+  if (!width || !height) throw new Error("画像サイズが0です");
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  canvas.getContext("2d").drawImage(source, 0, 0, width, height);
+  return canvas;
+}
+
+function composeImageEditCanvas() {
+  if (!_crop.editCanvas) return null;
+  const canvas = document.createElement("canvas");
+  canvas.width = _crop.editCanvas.width;
+  canvas.height = _crop.editCanvas.height;
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(_crop.editCanvas, 0, 0);
+  if (_crop.inkCanvas) ctx.drawImage(_crop.inkCanvas, 0, 0);
+  return canvas;
+}
+
+function rebuildImageEditInkCanvasFromStrokes() {
+  if (!_crop.editCanvas) return;
+  const canvas = createBlankImageEditInkCanvas(_crop.editCanvas.width, _crop.editCanvas.height);
+  const ctx = canvas.getContext("2d");
+  _crop.inkStrokes.forEach(stroke => {
+    if (stroke.canvas) ctx.drawImage(stroke.canvas, 0, 0);
+  });
+  _crop.inkCanvas = canvas;
+}
+
+function replaceImageEditCanvas(canvas, inkCanvas = null, rect = null, inkStrokes = null) {
+  _crop.editCanvas = canvas;
+  _crop.inkCanvas = inkCanvas || createBlankImageEditInkCanvas(canvas.width, canvas.height);
+  _crop.inkStrokes = cloneImageEditStrokes(inkStrokes || []);
+  _crop.currentStroke = null;
+  els.cropCanvas.width = canvas.width;
+  els.cropCanvas.height = canvas.height;
+  fitImageEditCanvasToViewport();
+  _crop.scale = 1;
+  _crop.rect = rect
+    ? _cropClamp(rect)
+    : { x: 0, y: 0, w: canvas.width, h: canvas.height };
+  _crop.drag = null;
+  _crop.lastPoint = null;
+  _crop.brushPreviewPoint = null;
+  drawCropCanvas();
+  updateCropConfirmState();
+}
+
+function openImageEditor(figure, initialMode = "pen") {
   const imgEl = figure.querySelector("img.inline-media");
   if (!imgEl) return;
 
   _crop.figure    = figure;
   _crop.imgEl     = imgEl;
   _crop.canvasImg = null;
+  _crop.editCanvas = null;
+  _crop.inkCanvas = null;
+  _crop.inkStrokes = [];
+  _crop.currentStroke = null;
+  _crop.history = [];
+  _crop.brushPreviewPoint = null;
+  _crop.mode      = initialMode === "crop" ? "crop" : "pen";
   _crop.ready     = false;
   _crop.confirming = false;
   const sessionId = ++_crop.sessionId;
@@ -10441,39 +11229,12 @@ function openCropModal(figure) {
   // ② cache:'no-store' で 304 を完全に回避し、常にフルボディを取得する。
   //    fetch が 304 を返すとボディが空になり blob が空 → canvas が黒くなる。
   //    Blob → ObjectURL → Image.onload 経路は CORS タント・デコード未完了も回避できる。
-  const fetchOptions = /^https?:/i.test(imgEl.src) ? { cache: "no-store" } : {};
-  fetch(imgEl.src, fetchOptions)
-    .then(r => r.blob())
-    .then(blob => {
-      if (blob.size === 0) throw new Error("画像データが空です");
-      return new Promise((resolve, reject) => {
-        const objUrl = URL.createObjectURL(blob);
-        const img    = new Image();
-        img.onload  = () => { URL.revokeObjectURL(objUrl); resolve(img); };
-        img.onerror = () => { URL.revokeObjectURL(objUrl); reject(new Error("デコード失敗")); };
-        img.src = objUrl;
-      });
-    })
+  loadImageForEditorSource(mediaSrcForStorage(imgEl))
     .then(img => {
       if (sessionId !== _crop.sessionId || els.cropOverlay.hidden) return;
       _crop.canvasImg = img;
-
-      const nw = img.naturalWidth;
-      const nh = img.naturalHeight;
-      if (nw === 0 || nh === 0) throw new Error("画像サイズが0です");
-
-      const maxW = Math.min(window.innerWidth  * 0.9  - 56, 900);
-      const maxH = Math.min(window.innerHeight * 0.72 - 80, 700);
-      _crop.scale = Math.min(maxW / nw, maxH / nh, 1);
-
-      const cw = Math.round(nw * _crop.scale);
-      const ch = Math.round(nh * _crop.scale);
-      els.cropCanvas.width  = cw;
-      els.cropCanvas.height = ch;
-
-      _crop.rect = { x: 0, y: 0, w: cw, h: ch };
-      _crop.drag = null;
       _crop.ready = true;
+      replaceImageEditCanvas(canvasFromImageSource(img));
       updateCropConfirmState();
       drawCropCanvas();
     })
@@ -10484,38 +11245,330 @@ function openCropModal(figure) {
     });
 }
 
+function openCropModal(figure) {
+  openImageEditor(figure, "crop");
+}
+
 function closeCropModal() {
   els.cropOverlay.hidden = true;
   if (_crop.canvasImg instanceof ImageBitmap) _crop.canvasImg.close();
   _crop.figure    = null;
   _crop.imgEl     = null;
   _crop.canvasImg = null;
+  _crop.editCanvas = null;
+  _crop.inkCanvas = null;
+  _crop.inkStrokes = [];
+  _crop.currentStroke = null;
   _crop.drag      = null;
+  _crop.lastPoint = null;
+  _crop.history   = [];
   _crop.ready     = false;
   _crop.confirming = false;
   _crop.sessionId += 1;
   updateCropConfirmState();
 }
 
+function getImageEditPenWidth() {
+  const size = Number(els.imageEditPenSize?.value || _crop.penSize || 8);
+  return Math.max(1, size * getImageEditCanvasScale());
+}
+
+function createImageEditStrokeCanvas() {
+  if (!_crop.inkCanvas) return null;
+  return createBlankImageEditInkCanvas(_crop.inkCanvas.width, _crop.inkCanvas.height);
+}
+
+function beginImageEditStroke() {
+  const canvas = createImageEditStrokeCanvas();
+  if (!canvas) return null;
+  const stroke = { canvas };
+  _crop.inkStrokes.push(stroke);
+  _crop.currentStroke = stroke;
+  return stroke;
+}
+
+function drawImageEditBrushLineOnCanvas(canvas, from, to, { eraser = false } = {}) {
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  if (eraser) ctx.globalCompositeOperation = "destination-out";
+  ctx.strokeStyle = eraser ? "rgba(0,0,0,1)" : _crop.penColor;
+  ctx.lineWidth = getImageEditPenWidth();
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.beginPath();
+  ctx.moveTo(from.x, from.y);
+  ctx.lineTo(to.x, to.y);
+  ctx.stroke();
+  if (from.x === to.x && from.y === to.y) {
+    ctx.beginPath();
+    ctx.arc(to.x, to.y, ctx.lineWidth / 2, 0, Math.PI * 2);
+    ctx.fillStyle = ctx.strokeStyle;
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawImageEditPenLine(from, to) {
+  if (!_crop.inkCanvas) return;
+  const isPixelEraser = _crop.mode === "eraser" && _crop.eraserType === "pixel";
+
+  drawImageEditBrushLineOnCanvas(_crop.inkCanvas, from, to, { eraser: isPixelEraser });
+  if (_crop.mode === "pen") {
+    drawImageEditBrushLineOnCanvas(_crop.currentStroke?.canvas, from, to);
+  } else if (isPixelEraser) {
+    _crop.inkStrokes.forEach(stroke => {
+      drawImageEditBrushLineOnCanvas(stroke.canvas, from, to, { eraser: true });
+    });
+  }
+  drawCropCanvas();
+}
+
+function findImageEditInkPixelNear(point, imageData, radius) {
+  const { width, height, data } = imageData;
+  const cx = Math.max(0, Math.min(width - 1, Math.round(point.x)));
+  const cy = Math.max(0, Math.min(height - 1, Math.round(point.y)));
+  const r = Math.max(1, Math.ceil(radius));
+  const r2 = r * r;
+  let bestIndex = -1;
+  let bestDist = Infinity;
+
+  for (let y = Math.max(0, cy - r); y <= Math.min(height - 1, cy + r); y += 1) {
+    for (let x = Math.max(0, cx - r); x <= Math.min(width - 1, cx + r); x += 1) {
+      const dx = x - point.x;
+      const dy = y - point.y;
+      const dist = dx * dx + dy * dy;
+      if (dist > r2 || dist >= bestDist) continue;
+      const index = y * width + x;
+      if (data[index * 4 + 3] === 0) continue;
+      bestIndex = index;
+      bestDist = dist;
+    }
+  }
+  return bestIndex;
+}
+
+function findImageEditStrokeIndexAt(point) {
+  const radius = Math.max(4, getImageEditPenWidth() / 2);
+  for (let i = _crop.inkStrokes.length - 1; i >= 0; i -= 1) {
+    const canvas = _crop.inkStrokes[i]?.canvas;
+    if (!canvas) continue;
+    const imageData = canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height);
+    if (findImageEditInkPixelNear(point, imageData, radius) >= 0) return i;
+  }
+  return -1;
+}
+
+function eraseImageEditInkObjectAt(point) {
+  const index = findImageEditStrokeIndexAt(point);
+  if (index < 0) return false;
+  _crop.inkStrokes.splice(index, 1);
+  rebuildImageEditInkCanvasFromStrokes();
+  drawCropCanvas();
+  return true;
+}
+
+function rotateImageEditSourceCanvas(src, direction) {
+  const dst = document.createElement("canvas");
+  dst.width = src.height;
+  dst.height = src.width;
+  const ctx = dst.getContext("2d");
+  ctx.save();
+  ctx.translate(dst.width / 2, dst.height / 2);
+  ctx.rotate((direction > 0 ? 90 : -90) * Math.PI / 180);
+  ctx.drawImage(src, -src.width / 2, -src.height / 2);
+  ctx.restore();
+  return dst;
+}
+
+function flipImageEditSourceCanvas(src, axis) {
+  const dst = document.createElement("canvas");
+  dst.width = src.width;
+  dst.height = src.height;
+  const ctx = dst.getContext("2d");
+  ctx.save();
+  ctx.translate(axis === "x" ? dst.width : 0, axis === "y" ? dst.height : 0);
+  ctx.scale(axis === "x" ? -1 : 1, axis === "y" ? -1 : 1);
+  ctx.drawImage(src, 0, 0);
+  ctx.restore();
+  return dst;
+}
+
+function cropImageEditSourceCanvas(src, x, y, w, h) {
+  const dst = document.createElement("canvas");
+  dst.width = w;
+  dst.height = h;
+  dst.getContext("2d").drawImage(src, x, y, w, h, 0, 0, w, h);
+  return dst;
+}
+
+function rotateImageEditCanvas(direction) {
+  if (!_crop.editCanvas) return;
+  pushImageEditHistory();
+  const src = _crop.editCanvas;
+  const dst = rotateImageEditSourceCanvas(src, direction);
+
+  const ink = _crop.inkCanvas || createBlankImageEditInkCanvas(src.width, src.height);
+  const nextInk = rotateImageEditSourceCanvas(ink, direction);
+  const nextStrokes = _crop.inkStrokes.map(stroke => ({
+    canvas: rotateImageEditSourceCanvas(stroke.canvas, direction),
+  }));
+
+  replaceImageEditCanvas(dst, nextInk, null, nextStrokes);
+}
+
+function flipImageEditCanvas(axis) {
+  if (!_crop.editCanvas) return;
+  pushImageEditHistory();
+  const src = _crop.editCanvas;
+  const dst = flipImageEditSourceCanvas(src, axis);
+
+  const ink = _crop.inkCanvas || createBlankImageEditInkCanvas(src.width, src.height);
+  const nextInk = flipImageEditSourceCanvas(ink, axis);
+  const nextStrokes = _crop.inkStrokes.map(stroke => ({
+    canvas: flipImageEditSourceCanvas(stroke.canvas, axis),
+  }));
+
+  replaceImageEditCanvas(dst, nextInk, null, nextStrokes);
+}
+
+function getImageEditCropBounds() {
+  if (_crop.mode !== "crop" || !_crop.editCanvas) return { ok: true, changed: false };
+  const src = _crop.editCanvas;
+  const x = Math.max(0, Math.round(_crop.rect.x));
+  const y = Math.max(0, Math.round(_crop.rect.y));
+  const w = Math.min(src.width - x, Math.round(_crop.rect.w));
+  const h = Math.min(src.height - y, Math.round(_crop.rect.h));
+  if (w < 2 || h < 2) return { ok: false, changed: false };
+  const changed = !(x === 0 && y === 0 && w === src.width && h === src.height);
+  return { ok: true, changed, x, y, w, h };
+}
+
+function applyImageEditCropSelection(bounds = getImageEditCropBounds()) {
+  if (!bounds.ok) return { ok: false, changed: false };
+  if (!bounds.changed || !_crop.editCanvas) return { ok: true, changed: false };
+  const { x, y, w, h } = bounds;
+  const src = _crop.editCanvas;
+
+  const dst = cropImageEditSourceCanvas(src, x, y, w, h);
+
+  const inkSrc = _crop.inkCanvas || createBlankImageEditInkCanvas(src.width, src.height);
+  const inkDst = cropImageEditSourceCanvas(inkSrc, x, y, w, h);
+  const nextStrokes = _crop.inkStrokes.map(stroke => ({
+    canvas: cropImageEditSourceCanvas(stroke.canvas, x, y, w, h),
+  }));
+  replaceImageEditCanvas(dst, inkDst, null, nextStrokes);
+  return { ok: true, changed: true };
+}
+
+function confirmCropWithinEditor() {
+  const bounds = getImageEditCropBounds();
+  if (!bounds.ok) {
+    showToast("範囲が小さすぎます。");
+    return false;
+  }
+  if (!bounds.changed) {
+    showToast("トリミング範囲を選択してください。");
+    return false;
+  }
+
+  pushImageEditHistory();
+  const result = applyImageEditCropSelection(bounds);
+  if (!result.ok) {
+    showToast("範囲が小さすぎます。");
+    return false;
+  }
+  setImageEditMode("pen");
+  showToast("トリミングしました。");
+  return true;
+}
+
+async function loadOriginalIntoImageEditor() {
+  const originalSrc = _crop.figure?.dataset?.originalSrc || "";
+  if (!originalSrc) {
+    showToast("元画像が残っていません。");
+    return;
+  }
+  if (_crop.confirming) return;
+  const ok = await showConfirm("現在の編集内容を破棄して元画像を読み込みますか？", "元画像に戻す");
+  if (!ok) return;
+
+  _crop.confirming = true;
+  updateCropConfirmState();
+  try {
+    const img = await loadImageForEditorSource(originalSrc);
+    _crop.canvasImg = img;
+    pushImageEditHistory();
+    replaceImageEditCanvas(canvasFromImageSource(img));
+    setImageEditMode("pen");
+    showToast("元画像を読み込みました。");
+  } catch (err) {
+    showToast("元画像の読み込みに失敗しました: " + err.message);
+  } finally {
+    _crop.confirming = false;
+    updateCropConfirmState();
+  }
+}
+
 // ポインターイベント（マウス + タッチ共通）
 els.cropCanvas.addEventListener("pointerdown", e => {
+  if (!_crop.ready) return;
   e.preventDefault();
   els.cropCanvas.setPointerCapture(e.pointerId);
   const { x, y } = _cropClientToCanvas(e);
-  const type = _cropHitType(x, y);
+  if (_crop.mode === "pen" || _crop.mode === "eraser") {
+    _crop.brushPreviewPoint = { x, y };
+    pushImageEditHistory();
+    _crop.drag = { type: "brush" };
+    _crop.lastPoint = { x, y };
+    if (_crop.mode === "pen") beginImageEditStroke();
+    if (_crop.mode === "eraser" && _crop.eraserType === "object") {
+      eraseImageEditInkObjectAt(_crop.lastPoint);
+      return;
+    }
+    drawImageEditPenLine(_crop.lastPoint, _crop.lastPoint);
+    return;
+  }
+  let type = _cropHitType(x, y);
+  if (type === "move" && _cropIsFullSelection()) type = "new";
   _crop.drag = { type, startX: x, startY: y, initRect: { ..._crop.rect } };
 });
 
 els.cropCanvas.addEventListener("pointermove", e => {
+  if (!_crop.ready) return;
+  const { x, y } = _cropClientToCanvas(e);
+  if (_crop.mode === "eraser" && _crop.eraserType === "pixel") {
+    _crop.brushPreviewPoint = { x, y };
+    if (!_crop.drag) drawCropCanvas();
+  } else if (_crop.brushPreviewPoint) {
+    _crop.brushPreviewPoint = null;
+    if (!_crop.drag) drawCropCanvas();
+  }
+
   if (!_crop.drag) {
     // カーソル形状を変える
-    const { x, y } = _cropClientToCanvas(e);
+    if (_crop.mode === "pen" || _crop.mode === "eraser") {
+      els.cropCanvas.style.cursor = "crosshair";
+      return;
+    }
     const cursors = { nw: "nw-resize", ne: "ne-resize", sw: "sw-resize", se: "se-resize", move: "move", new: "crosshair" };
     els.cropCanvas.style.cursor = cursors[_cropHitType(x, y)] ?? "crosshair";
     return;
   }
   e.preventDefault();
-  const { x, y } = _cropClientToCanvas(e);
+  if (_crop.drag.type === "brush") {
+    const point = { x, y };
+    _crop.brushPreviewPoint = _crop.mode === "eraser" && _crop.eraserType === "pixel" ? point : null;
+    if (_crop.mode === "eraser" && _crop.eraserType === "object") {
+      eraseImageEditInkObjectAt(point);
+      _crop.lastPoint = point;
+      return;
+    }
+    drawImageEditPenLine(_crop.lastPoint || point, point);
+    _crop.lastPoint = point;
+    return;
+  }
   const dx = x - _crop.drag.startX;
   const dy = y - _crop.drag.startY;
   const r  = _crop.drag.initRect;
@@ -10545,55 +11598,55 @@ els.cropCanvas.addEventListener("pointermove", e => {
   drawCropCanvas();
 });
 
-els.cropCanvas.addEventListener("pointerup",     () => { _crop.drag = null; });
-els.cropCanvas.addEventListener("pointercancel", () => { _crop.drag = null; });
+els.cropCanvas.addEventListener("pointerup",     () => { _crop.drag = null; _crop.lastPoint = null; _crop.currentStroke = null; });
+els.cropCanvas.addEventListener("pointercancel", () => { _crop.drag = null; _crop.lastPoint = null; _crop.currentStroke = null; _crop.brushPreviewPoint = null; drawCropCanvas(); });
+els.cropCanvas.addEventListener("pointerleave", () => {
+  if (_crop.drag) return;
+  _crop.brushPreviewPoint = null;
+  drawCropCanvas();
+});
+window.addEventListener("resize", () => {
+  if (!els.cropOverlay || els.cropOverlay.hidden) return;
+  fitImageEditCanvasToViewport();
+  drawCropCanvas();
+});
 
 async function confirmCrop() {
   if (_crop.confirming) return;
-  if (!_crop.ready || !_crop.canvasImg) {
+  if (!_crop.ready || !_crop.editCanvas) {
     showToast("画像の読み込みが終わってから確定してください。");
     return;
   }
-  const { figure, imgEl, scale, rect } = _crop;
+  if (_crop.mode === "crop") {
+    confirmCropWithinEditor();
+    return;
+  }
+
+  const { figure, imgEl } = _crop;
   if (!figure || !imgEl) return;
   _crop.confirming = true;
   updateCropConfirmState();
 
-  const nx = Math.round(rect.x / scale);
-  const ny = Math.round(rect.y / scale);
-  const nw = Math.round(rect.w / scale);
-  const nh = Math.round(rect.h / scale);
-  if (nw < 2 || nh < 2) {
-    _crop.confirming = false;
-    updateCropConfirmState();
-    showToast("範囲が小さすぎます。");
-    return;
-  }
-  pushUndoSnapshot(snapshotFromNote(getSelectedNote()));
-
-  const tmpCanvas = document.createElement("canvas");
-  tmpCanvas.width  = nw;
-  tmpCanvas.height = nh;
-  // canvasImg（proxyImg）でトリミング描画。DOM <img> は CORS タイントの懸念があるため使わない
-  const drawSrc = _crop.canvasImg || imgEl;
-  tmpCanvas.getContext("2d").drawImage(drawSrc, nx, ny, nw, nh, 0, 0, nw, nh);
+  pushUndoSnapshot(snapshotFromEditor(getSelectedNote()?.id));
+  rememberOriginalImageSource(figure, imgEl);
 
   try {
-    const blob = await canvasToBlob(tmpCanvas, "image/png");
-    const croppedUrl = await blobToDataUrl(blob);
+    const outputCanvas = composeImageEditCanvas();
+    const blob = await canvasToBlob(outputCanvas, "image/png");
+    const editedUrl = await blobToDataUrl(blob);
 
     imgEl.addEventListener("load", () => scheduleMediaCaretSync(), { once: true });
-    imgEl.src = croppedUrl;
-    imgEl.alt = "cropped.png";
+    imgEl.src = editedUrl;
+    imgEl.alt = _crop.mode === "crop" ? "cropped.png" : "edited.png";
     scheduleMediaCaretSync();
 
     scheduleSave();
     closeCropModal();
-    showToast("トリミングしました。");
+    showToast("画像を編集しました。");
   } catch (err) {
     _crop.confirming = false;
     updateCropConfirmState();
-    showToast("トリミングに失敗しました: " + err.message);
+    showToast("画像編集に失敗しました: " + err.message);
   }
 }
 
@@ -10601,6 +11654,40 @@ els.cropOk    .addEventListener("click", confirmCrop);
 els.cropCancel.addEventListener("click", closeCropModal);
 els.cropOverlay.addEventListener("click", e => {
   if (e.target === els.cropOverlay) closeCropModal();
+});
+document.addEventListener("keydown", e => {
+  if (e.key !== "Enter" || isImeComposing(e)) return;
+  if (!els.cropOverlay || els.cropOverlay.hidden) return;
+  if (els.confirmOverlay?.classList.contains("open")) return;
+  if (e.target === els.cropCancel) return;
+  const tag = e.target?.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  void confirmCrop();
+}, true);
+els.imageEditPenBtn?.addEventListener("click", () => setImageEditMode("pen"));
+els.imageEditEraserBtn?.addEventListener("click", () => setImageEditMode("eraser"));
+els.imageEditCropBtn?.addEventListener("click", () => setImageEditMode("crop"));
+els.imageEditUndoBtn?.addEventListener("click", undoImageEditStep);
+els.imageEditRotateLeftBtn?.addEventListener("click", () => rotateImageEditCanvas(-1));
+els.imageEditRotateRightBtn?.addEventListener("click", () => rotateImageEditCanvas(1));
+els.imageEditFlipHBtn?.addEventListener("click", () => flipImageEditCanvas("x"));
+els.imageEditFlipVBtn?.addEventListener("click", () => flipImageEditCanvas("y"));
+els.imageEditRestoreBtn?.addEventListener("click", loadOriginalIntoImageEditor);
+els.imageEditPenColorWrap?.addEventListener("click", e => {
+  const button = e.target.closest("[data-pen-color]");
+  if (!button) return;
+  setImageEditPenColor(button.dataset.penColor);
+});
+els.imageEditPenSize?.addEventListener("input", e => {
+  _crop.penSize = Number(e.target.value || _crop.penSize || 8);
+  drawCropCanvas();
+});
+els.imageEditEraserTypeWrap?.addEventListener("click", e => {
+  const button = e.target.closest("[data-eraser-type]");
+  if (!button) return;
+  setImageEditEraserType(button.dataset.eraserType);
 });
 
 // ── メディアコンテキストメニュー ──────────────────────────────────────────────
@@ -10692,6 +11779,13 @@ els.mediaContextMenu.addEventListener("click", e => {
     scheduleMediaCaretSync();
     hideMediaCtxMenu();
     scheduleSave();
+    return;
+  }
+
+  if (action === "edit") {
+    const figure = state.mediaCmFigure;
+    hideMediaCtxMenu();
+    openImageEditor(figure, "pen");
     return;
   }
 
@@ -10995,6 +12089,7 @@ els.contextMenu.addEventListener("click", async e => {
   switch (action) {
     case "rename":    startInlineRename(id); break;
     case "add-child": await createNote(id); break;
+    case "add-todo": await addNoteToTodoList(id); break;
     case "convert-mindmap": await convertSelectedNoteToMindMap(id); break;
     case "toggle-check": await toggleCheckedNote(id); break;
     case "toggle-pin": await togglePinnedNote(id); break;
@@ -11022,6 +12117,9 @@ document.addEventListener("click", e => {
   if (!clickedMemoFormat) closeMemoFormatPanel();
   if (!els.noteListPanel?.hidden && !els.noteListPanel.contains(e.target) && !els.noteListBtn?.contains(e.target)) {
     closeNoteListPanel();
+  }
+  if (!els.noteTodoPanel?.hidden && !els.noteTodoPanel.contains(e.target) && !els.noteTodoBtn?.contains(e.target)) {
+    closeNoteTodoPanel();
   }
   const clickedCollabStatus = Boolean(
     els.collabStatusPanel?.contains(e.target) ||
@@ -11122,6 +12220,11 @@ document.addEventListener("keydown", e => {
   if (e.key === "Escape" && !els.noteListPanel?.hidden) {
     e.preventDefault();
     closeNoteListPanel();
+    return;
+  }
+  if (e.key === "Escape" && !els.noteTodoPanel?.hidden) {
+    e.preventDefault();
+    closeNoteTodoPanel();
     return;
   }
   if (e.key === "Escape" && !els.collabStatusPanel?.hidden) {
@@ -11229,16 +12332,38 @@ els.noteListItems?.addEventListener("click", e => {
     void openRootNoteFromList(noteId);
   }
 });
+els.noteTodoBtn?.addEventListener("click", e => {
+  e.stopPropagation();
+  if (els.noteTodoPanel?.hidden) openNoteTodoPanel();
+  else closeNoteTodoPanel();
+});
+els.noteTodoItems?.addEventListener("click", e => {
+  const item = e.target.closest(".mindmap-list-item");
+  if (!item) return;
+  const todoId = item.dataset.id;
+  const action = e.target.closest("[data-action]")?.dataset.action;
+  if (action === "open-note") {
+    e.stopPropagation();
+    void openNoteFromTodo(todoId);
+  } else if (action === "delete") {
+    e.stopPropagation();
+    void deleteTodo(todoId);
+  } else if (action === "toggle") {
+    void toggleTodoDone(todoId);
+  }
+});
 els.mobileMenuBackdrop.addEventListener("click", closeMobileMenu);
 if (mobileMenuMql.addEventListener) {
   mobileMenuMql.addEventListener("change", e => {
     closeMobileMenu();
     closeNoteListPanel();
+    closeNoteTodoPanel();
   });
 } else {
   mobileMenuMql.addListener(e => {
     closeMobileMenu();
     closeNoteListPanel();
+    closeNoteTodoPanel();
   });
 }
 setMobileMenuOpen(false);
@@ -11255,6 +12380,8 @@ els.memoSettingsBtn?.addEventListener("click", e => {
 });
 els.memoSettingsClose?.addEventListener("click", closeMemoSettingsPanel);
 els.downloadNotesPdfBtn?.addEventListener("click", () => { closeMemoSettingsPanel(); downloadNotesAsPdf(); });
+els.downloadNotesTxtBtn?.addEventListener("click", () => { closeMemoSettingsPanel(); downloadNotesAsTxt(); });
+els.downloadNotesMdBtn?.addEventListener("click", () => { closeMemoSettingsPanel(); downloadNotesAsMarkdown(); });
 els.noteToMindMapBtn?.addEventListener("click", () => {
   closeMemoSettingsPanel();
   convertSelectedNoteToMindMap();
@@ -11712,6 +12839,10 @@ async function handleDeleteAccount(e) {
     console.log("[deleteAccount] deleting users/{uid}/mindmaps ...");
     await deleteCollectionInBatches(userRef.collection("mindmaps"));
     console.log("[deleteAccount] mindmaps deleted");
+
+    console.log("[deleteAccount] deleting users/{uid}/todos ...");
+    await deleteCollectionInBatches(userRef.collection("todos"));
+    console.log("[deleteAccount] todos deleted");
 
     console.log("[deleteAccount] deleting users/{uid} document ...");
     await userRef.delete().catch(err => console.warn("[deleteAccount] users/{uid} doc delete error:", err));

@@ -3,13 +3,14 @@ from __future__ import annotations
 import json
 import os
 import zipfile
+from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
 
 from google import genai
 from google.genai import types as genai_types
 from dotenv import load_dotenv
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, Response, abort, render_template, request, jsonify
 from docx import Document
 from openpyxl import load_workbook
 from pypdf import PdfReader
@@ -17,7 +18,146 @@ from pypdf import PdfReader
 load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent
+TEMPLATES_DIR = BASE_DIR / "templates"
 app = Flask(__name__)
+
+# ── SEOページ関連の設定 ────────────────────────────────────────────────────────
+# アプリ本体（/app）とは切り離した、検索エンジン向けの静的ページ群で使う定数・
+# ページ一覧。sitemap.xml もこの一覧から自動生成する。
+
+SITE_NAME = "まとめときや"
+SITE_URL = "https://matome.webtool-labs.com"
+OPERATOR_NAME = "WebTool-Labs"
+OPERATOR_PROFILE_URL = "https://profile.webtool-labs.com/"
+OPERATOR_SITE_URL = "https://webtool-labs.com/"
+CONTACT_FORM_URL = (
+    "https://docs.google.com/forms/d/e/1FAIpQLSePfOxSZwYoGcL7csdt1RbLY4eQ9gdu6ePqcgZ96xTxZj8GXA/viewform?usp=publish-editor"
+)
+
+# 狙うキーワードごとの1ページ。テンプレートは templates/seo/keywords/ 配下。
+KEYWORD_PAGES = [
+    {
+        "slug": "hierarchical-memo",
+        "keyword": "階層メモ アプリ",
+        "label": "階層メモアプリとは",
+        "template": "seo/keywords/hierarchical-memo.html",
+    },
+    {
+        "slug": "free-mindmap",
+        "keyword": "マインドマップ 作成 無料",
+        "label": "無料マインドマップ作成",
+        "template": "seo/keywords/free-mindmap.html",
+    },
+    {
+        "slug": "organize-ideas",
+        "keyword": "メモ アイデア整理",
+        "label": "アイデア整理のコツ",
+        "template": "seo/keywords/organize-ideas.html",
+    },
+    {
+        "slug": "ai-memo-generator",
+        "keyword": "AI メモ 自動生成",
+        "label": "AIでメモを自動生成",
+        "template": "seo/keywords/ai-memo-generator.html",
+    },
+    {
+        "slug": "collaborative-memo",
+        "keyword": "共同編集 メモ帳",
+        "label": "共同編集メモ帳",
+        "template": "seo/keywords/collaborative-memo.html",
+    },
+    {
+        "slug": "structured-notes",
+        "keyword": "ノート 構造化",
+        "label": "ノートを構造化する",
+        "template": "seo/keywords/structured-notes.html",
+    },
+]
+KEYWORD_PAGES_BY_SLUG = {page["slug"]: page for page in KEYWORD_PAGES}
+
+# 悩み系キーワードで書くブログ記事。テンプレートは templates/seo/blog/ 配下。
+BLOG_POSTS = [
+    {
+        "slug": "organize-scattered-ideas",
+        "title": "アイデアが頭の中でごちゃごちゃになる人へ。階層メモで思考を整理するコツ",
+        "template": "seo/blog/organize-scattered-ideas.html",
+    },
+    {
+        "slug": "mindmap-vs-memo",
+        "title": "マインドマップとメモ、結局どっちを使えばいい？使い分けの考え方",
+        "template": "seo/blog/mindmap-vs-memo.html",
+    },
+    {
+        "slug": "ai-brainstorming-tips",
+        "title": "一人ブレストで手が止まったときの、AIとメモアプリの組み合わせ方",
+        "template": "seo/blog/ai-brainstorming-tips.html",
+    },
+]
+BLOG_POSTS_BY_SLUG = {post["slug"]: post for post in BLOG_POSTS}
+
+# /faq とランディングページ抜粋、FAQPage構造化データで共用する質問一覧。
+FAQ_ITEMS = [
+    {
+        "question": "無料で使えますか？",
+        "answer": "はい、まとめときやは無料でご利用いただけます。メモ作成・階層管理・マインドマップ・AI生成・共同編集など、主要な機能はすべて追加費用なしで使えます。",
+    },
+    {
+        "question": "会員登録は必要ですか？",
+        "answer": "まとめときやを使うにはアカウント登録（メールアドレスまたはGoogleアカウント）が必要です。登録すればログインしたどの端末からでも続きから編集できます。",
+    },
+    {
+        "question": "作成したメモはどこに保存されますか？",
+        "answer": "メモはお使いのアカウントに紐づけてクラウド上に保存されます。端末を変えても、ログインすれば同じ内容を確認・編集できます。",
+    },
+    {
+        "question": "他の人と一緒に編集できますか？",
+        "answer": "はい。「共同編集」機能を使うと、合言葉を伝えるだけで複数人が同じメモをリアルタイムで編集できます。",
+    },
+    {
+        "question": "AIでメモを作るとき、入力した内容は保存されますか？",
+        "answer": "AI生成のために入力したテーマや添付ファイルは、生成処理のためだけに利用され、アップロード内容自体をサーバー側に保存することはありません。",
+    },
+    {
+        "question": "作成したメモを他の形式で書き出せますか？",
+        "answer": "メモはPDF・テキスト・Markdown形式で、マインドマップはPNG・SVG・PDF形式でダウンロードできます。",
+    },
+]
+
+
+def get_public_pages() -> list[dict]:
+    """sitemap.xml生成用の公開ページ一覧（パス・優先度・対応テンプレート）。
+    アプリ内API・ログイン後にしか意味を持たないページは含めない。"""
+    pages = [
+        {"path": "/", "template": "seo/landing.html", "priority": "1.0"},
+        {"path": "/app", "template": "index.html", "priority": "0.9"},
+        {"path": "/how-to-use", "template": "seo/how_to_use.html", "priority": "0.6"},
+        {"path": "/faq", "template": "seo/faq.html", "priority": "0.6"},
+        {"path": "/about", "template": "seo/about.html", "priority": "0.4"},
+        {"path": "/privacy", "template": "seo/privacy.html", "priority": "0.3"},
+        {"path": "/terms", "template": "seo/terms.html", "priority": "0.3"},
+        {"path": "/contact", "template": "seo/contact.html", "priority": "0.4"},
+    ]
+    for page in KEYWORD_PAGES:
+        pages.append({"path": f"/{page['slug']}", "template": page["template"], "priority": "0.8"})
+    for post in BLOG_POSTS:
+        pages.append({"path": f"/blog/{post['slug']}", "template": post["template"], "priority": "0.6"})
+    return pages
+
+
+@app.context_processor
+def inject_seo_globals():
+    return {
+        "site_name": SITE_NAME,
+        "site_url": SITE_URL,
+        "operator_name": OPERATOR_NAME,
+        "operator_profile_url": OPERATOR_PROFILE_URL,
+        "operator_site_url": OPERATOR_SITE_URL,
+        "contact_form_url": CONTACT_FORM_URL,
+        "keyword_pages": KEYWORD_PAGES,
+        "blog_posts": BLOG_POSTS,
+        "canonical_url": f"{SITE_URL}{request.path}",
+        "current_year": datetime.now(tz=timezone.utc).year,
+    }
 
 _USE_VERTEX_AI = os.getenv("USE_VERTEX_AI", "false").lower() == "true"
 _GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash-lite")
@@ -285,7 +425,7 @@ def build_ai_contents(prompt_template: str, prompt: str, image_part: genai_types
     return [image_part, formatted_prompt]
 
 
-@app.get("/")
+@app.get("/app")
 def index():
     return render_template("index.html")
 
@@ -293,6 +433,125 @@ def index():
 @app.get("/auth/action")
 def auth_action():
     return render_template("auth_action.html")
+
+
+# ── SEOページ ─────────────────────────────────────────────────────────────────
+
+@app.get("/")
+def seo_landing():
+    webapp_jsonld = {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": SITE_NAME,
+        "url": f"{SITE_URL}/app",
+        "description": (
+            "頭の中のアイデアやタスクを、階層型のメモとマインドマップで整理できる無料アプリ。"
+            "AIによる自動生成や複数人での共同編集にも対応しています。"
+        ),
+        "applicationCategory": "ProductivityApplication",
+        "operatingSystem": "Web",
+        "offers": {
+            "@type": "Offer",
+            "price": "0",
+            "priceCurrency": "JPY",
+        },
+    }
+    return render_template("seo/landing.html", webapp_jsonld=webapp_jsonld, faq_items=FAQ_ITEMS[:3])
+
+
+@app.get("/how-to-use")
+def how_to_use():
+    return render_template("seo/how_to_use.html")
+
+
+@app.get("/faq")
+def faq():
+    faq_jsonld = {
+        "@context": "https://schema.org",
+        "@type": "FAQPage",
+        "mainEntity": [
+            {
+                "@type": "Question",
+                "name": item["question"],
+                "acceptedAnswer": {"@type": "Answer", "text": item["answer"]},
+            }
+            for item in FAQ_ITEMS
+        ],
+    }
+    return render_template("seo/faq.html", faq_items=FAQ_ITEMS, faq_jsonld=faq_jsonld)
+
+
+@app.get("/about")
+def about():
+    return render_template("seo/about.html")
+
+
+@app.get("/privacy")
+def privacy():
+    return render_template("seo/privacy.html")
+
+
+@app.get("/terms")
+def terms():
+    return render_template("seo/terms.html")
+
+
+@app.get("/contact")
+def contact():
+    return render_template("seo/contact.html")
+
+
+@app.get("/robots.txt")
+def robots_txt():
+    body = "\n".join([
+        "User-agent: *",
+        "Allow: /",
+        f"Sitemap: {SITE_URL}/sitemap.xml",
+        "",
+    ])
+    return Response(body, mimetype="text/plain")
+
+
+@app.get("/sitemap.xml")
+def sitemap_xml():
+    entries = []
+    for page in get_public_pages():
+        template_path = TEMPLATES_DIR / page["template"]
+        try:
+            mtime = template_path.stat().st_mtime
+        except OSError:
+            mtime = datetime.now(tz=timezone.utc).timestamp()
+        lastmod = datetime.fromtimestamp(mtime, tz=timezone.utc).strftime("%Y-%m-%d")
+        entries.append(
+            "<url>"
+            f"<loc>{SITE_URL}{page['path']}</loc>"
+            f"<lastmod>{lastmod}</lastmod>"
+            f"<priority>{page['priority']}</priority>"
+            "</url>"
+        )
+    xml = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+        + "".join(entries)
+        + "</urlset>"
+    )
+    return Response(xml, mimetype="application/xml")
+
+
+@app.get("/blog/<slug>")
+def blog_post(slug):
+    post = BLOG_POSTS_BY_SLUG.get(slug)
+    if not post:
+        abort(404)
+    return render_template(post["template"])
+
+
+@app.get("/<slug>")
+def keyword_page(slug):
+    page = KEYWORD_PAGES_BY_SLUG.get(slug)
+    if not page:
+        abort(404)
+    return render_template(page["template"], keyword=page["keyword"])
 
 
 @app.errorhandler(413)
@@ -359,5 +618,5 @@ def api_ai_mindmap():
 
 
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", "5003"))
+    port = int(os.getenv("PORT", "5006"))
     app.run(debug=True, port=port)

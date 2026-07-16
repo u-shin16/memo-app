@@ -1,0 +1,28 @@
+{% extends "seo_base.html" %}
+
+{% block title %}お問い合わせ｜{{ site_name }}{% endblock %}
+{% block description %}{{ site_name }}へのご意見・不具合の報告・機能のご要望はこちらのフォームからお送りください。{% endblock %}
+
+{% block content %}
+<section class="seo-main">
+  <h1>お問い合わせ</h1>
+  <p class="seo-lead">
+    ご意見、不具合の報告、追加してほしい機能などがありましたら、下記のフォームからお送りください。
+    内容を確認のうえ、必要に応じて対応いたします。
+  </p>
+
+  <div class="seo-card-grid">
+    <div class="seo-card">
+      <div class="seo-card-icon" aria-hidden="true">✉️</div>
+      <h3>お問い合わせフォーム</h3>
+      <p><a href="{{ contact_form_url }}" target="_blank" rel="noopener noreferrer">フォームを開く →</a></p>
+    </div>
+  </div>
+
+  <h2>よくある質問もあわせてご確認ください</h2>
+  <p>
+    お問い合わせの前に、<a href="{{ url_for('faq') }}">よくある質問</a>もご確認いただくと、
+    より早く解決する場合があります。
+  </p>
+</section>
+{% endblock %}

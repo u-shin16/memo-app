@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>まとめときや｜階層メモ帳アプリ</title>
   <meta name="description" content="アイデアを階層的に整理できるシンプルなメモ帳アプリです。画像・動画の添付にも対応。">
+  <meta name="robots" content="index, follow">
+  <link rel="canonical" href="{{ site_url }}/app">
   <meta name="theme-color" content="#2563eb">
   <meta name="application-name" content="まとめときや">
   <meta name="apple-mobile-web-app-title" content="まとめときや">
@@ -15,6 +17,35 @@
   <link rel="apple-touch-icon" sizes="180x180" href="{{ url_for('static', filename='icons/apple-touch-icon.png') }}">
   <link rel="manifest" href="{{ url_for('static', filename='site.webmanifest') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+
+  <meta property="og:title" content="まとめときや｜階層メモ帳アプリ">
+  <meta property="og:description" content="アイデアを階層的に整理できるシンプルなメモ帳アプリです。画像・動画の添付にも対応。">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="{{ site_url }}/app">
+  <meta property="og:image" content="{{ site_url }}{{ url_for('static', filename='ogp.png') }}">
+  <meta property="og:site_name" content="まとめときや">
+  <meta property="og:locale" content="ja_JP">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="まとめときや｜階層メモ帳アプリ">
+  <meta name="twitter:description" content="アイデアを階層的に整理できるシンプルなメモ帳アプリです。画像・動画の添付にも対応。">
+  <meta name="twitter:image" content="{{ site_url }}{{ url_for('static', filename='ogp.png') }}">
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebApplication",
+    "name": "まとめときや",
+    "url": "{{ site_url }}/app",
+    "description": "頭の中のアイデアやタスクを、階層型のメモとマインドマップで整理できる無料アプリ。AIによる自動生成や複数人での共同編集にも対応しています。",
+    "applicationCategory": "ProductivityApplication",
+    "operatingSystem": "Web",
+    "offers": {
+      "@type": "Offer",
+      "price": "0",
+      "priceCurrency": "JPY"
+    }
+  }
+  </script>
+
   <!-- Google tag (gtag.js) -->
   <script async src="https://www.googletagmanager.com/gtag/js?id=G-921LLN7VCT"></script>
   <script>
@@ -48,6 +79,11 @@
           <span class="btn-icon" aria-hidden="true">✨</span>
           <span class="btn-label">AI生成</span>
         </button>
+        <button id="noteTodoBtn" class="mindmap-tool-btn" type="button" title="TODOリストを開く" aria-label="TODOリストを開く" aria-haspopup="dialog" aria-expanded="false" aria-controls="noteTodoPanel">
+          <span class="btn-icon" aria-hidden="true">📋</span>
+          <span class="btn-label">TODO</span>
+          <span id="noteTodoCount" class="collab-status-count" hidden>0</span>
+        </button>
         <button id="memoSettingsBtn" class="mindmap-tool-btn settings-trigger-btn" type="button" title="メモ設定" aria-label="メモ設定" aria-haspopup="dialog" aria-expanded="false" aria-controls="memoSettingsPanel">
           <span class="btn-icon" aria-hidden="true">⚙</span>
           <span class="btn-label">メモ設定</span>
@@ -75,6 +111,11 @@
     <div id="noteListPanel" class="context-menu mindmap-list-panel note-list-panel" role="dialog" aria-label="親メモ一覧" hidden>
       <p class="mindmap-list-header">親メモ一覧</p>
       <ul id="noteListItems" class="mindmap-list-items"></ul>
+    </div>
+
+    <div id="noteTodoPanel" class="context-menu mindmap-list-panel note-list-panel" role="dialog" aria-label="TODOリスト" hidden>
+      <p class="mindmap-list-header">TODOリスト</p>
+      <ul id="noteTodoItems" class="mindmap-list-items"></ul>
     </div>
 
     <div id="mobileMenuBackdrop" class="mobile-menu-backdrop" hidden></div>
@@ -200,6 +241,14 @@
             <button id="downloadNotesPdfBtn" class="settings-action-btn" type="button" title="メモをPDFとして保存（印刷ダイアログで「PDFに保存」を選択）">
               <span class="btn-icon" aria-hidden="true">⬇</span>
               <span class="btn-label">PDF</span>
+            </button>
+            <button id="downloadNotesTxtBtn" class="settings-action-btn" type="button" title="メモをテキストファイルでダウンロード">
+              <span class="btn-icon" aria-hidden="true">⬇</span>
+              <span class="btn-label">テキスト</span>
+            </button>
+            <button id="downloadNotesMdBtn" class="settings-action-btn" type="button" title="メモをMarkdownファイルでダウンロード">
+              <span class="btn-icon" aria-hidden="true">⬇</span>
+              <span class="btn-label">Markdown</span>
             </button>
           </div>
         </div>
@@ -434,9 +483,9 @@
       <div class="ctx-sep"></div>
       <div class="ctx-section-label">画像サイズ</div>
       <button class="ctx-item" data-media-action="size" data-size="small">↘ 小さく表示 &nbsp;(120px)</button>
-      <button class="ctx-item" data-media-action="size" data-size="large">↗ 大きく表示 &nbsp;(75%)</button>
+      <button class="ctx-item" data-media-action="size" data-size="large">↗ 大きく表示 &nbsp;(100%)</button>
       <div class="ctx-sep"></div>
-      <button class="ctx-item" id="mediaTrimBtn" data-media-action="trim">✂️ トリミング</button>
+      <button class="ctx-item" id="mediaTrimBtn" data-media-action="edit">✎ 詳細・編集</button>
       <div class="ctx-sep"></div>
     </div>
     <button class="ctx-item ctx-danger" data-media-action="delete">🗑 削除</button>
@@ -450,11 +499,73 @@
     <img id="lightboxImg" class="lightbox-img" src="" alt="">
   </div>
 
-  <!-- トリミングモーダル -->
+  <!-- 画像編集モーダル -->
   <div id="cropOverlay" class="crop-overlay" hidden>
     <div class="crop-dialog">
-      <p class="crop-title">トリミング</p>
-      <p class="crop-hint">ドラッグして範囲を選択 / 角をドラッグでリサイズ</p>
+      <div class="image-edit-head">
+        <div>
+          <p id="cropTitle" class="crop-title">画像編集</p>
+          <p id="cropHint" class="crop-hint">ペン・回転・反転・トリミングを編集できます</p>
+        </div>
+      </div>
+      <div class="image-edit-toolbar" role="toolbar" aria-label="画像編集ツール">
+        <button id="imageEditPenBtn" class="btn ghost image-edit-tool-btn" type="button" data-image-edit-mode="pen" title="ペンで描く">
+          <span class="btn-icon" aria-hidden="true">✎</span>
+          <span class="btn-label">ペン</span>
+        </button>
+        <button id="imageEditEraserBtn" class="btn ghost image-edit-tool-btn" type="button" data-image-edit-mode="eraser" title="消しゴムで消す">
+          <span class="btn-icon" aria-hidden="true">⌫</span>
+          <span class="btn-label">消しゴム</span>
+        </button>
+        <button id="imageEditCropBtn" class="btn ghost image-edit-tool-btn" type="button" data-image-edit-mode="crop" title="トリミング範囲を選ぶ">
+          <span class="btn-icon" aria-hidden="true">▣</span>
+          <span class="btn-label">トリミング</span>
+        </button>
+        <button id="imageEditUndoBtn" class="btn ghost image-edit-tool-btn" type="button" title="一つ前の編集に戻す" aria-label="一つ前の編集に戻す" disabled>
+          <span class="btn-icon" aria-hidden="true">↶</span>
+          <span class="btn-label">一つ戻す</span>
+        </button>
+        <button id="imageEditRotateLeftBtn" class="btn ghost image-edit-tool-btn" type="button" title="左に90度回転" aria-label="左に90度回転">
+          <span class="btn-icon" aria-hidden="true">↺</span>
+          <span class="btn-label">左回転 90°</span>
+        </button>
+        <button id="imageEditRotateRightBtn" class="btn ghost image-edit-tool-btn" type="button" title="右に90度回転" aria-label="右に90度回転">
+          <span class="btn-icon" aria-hidden="true">↻</span>
+          <span class="btn-label">右回転 90°</span>
+        </button>
+        <button id="imageEditFlipHBtn" class="btn ghost image-edit-tool-btn" type="button" title="左右反転" aria-label="左右反転">
+          <span class="btn-icon" aria-hidden="true">↔</span>
+          <span class="btn-label">左右反転</span>
+        </button>
+        <button id="imageEditFlipVBtn" class="btn ghost image-edit-tool-btn" type="button" title="上下反転" aria-label="上下反転">
+          <span class="btn-icon" aria-hidden="true">↕</span>
+          <span class="btn-label">上下反転</span>
+        </button>
+        <button id="imageEditRestoreBtn" class="btn ghost image-edit-tool-btn" type="button" title="元画像を編集画面に読み込む">
+          <span class="btn-icon" aria-hidden="true">↶</span>
+          <span class="btn-label">元画像</span>
+        </button>
+        <div id="imageEditPenColorWrap" class="image-edit-pen-control image-edit-color-palette" role="group" aria-label="ペンの色">
+          <span class="image-edit-control-label">色</span>
+          <button class="image-edit-color-swatch" type="button" data-pen-color="#111827" style="--swatch-color:#111827" aria-label="黒"></button>
+          <button class="image-edit-color-swatch" type="button" data-pen-color="#ef4444" style="--swatch-color:#ef4444" aria-label="赤"></button>
+          <button class="image-edit-color-swatch" type="button" data-pen-color="#f97316" style="--swatch-color:#f97316" aria-label="オレンジ"></button>
+          <button class="image-edit-color-swatch" type="button" data-pen-color="#facc15" style="--swatch-color:#facc15" aria-label="黄色"></button>
+          <button class="image-edit-color-swatch" type="button" data-pen-color="#22c55e" style="--swatch-color:#22c55e" aria-label="緑"></button>
+          <button class="image-edit-color-swatch" type="button" data-pen-color="#2563eb" style="--swatch-color:#2563eb" aria-label="青"></button>
+          <button class="image-edit-color-swatch" type="button" data-pen-color="#a855f7" style="--swatch-color:#a855f7" aria-label="紫"></button>
+          <button class="image-edit-color-swatch is-light" type="button" data-pen-color="#ffffff" style="--swatch-color:#ffffff" aria-label="白"></button>
+        </div>
+        <div id="imageEditEraserTypeWrap" class="image-edit-pen-control image-edit-segmented" role="group" aria-label="消しゴムの種類" hidden>
+          <span class="image-edit-control-label">消し方</span>
+          <button class="image-edit-segment-btn" type="button" data-eraser-type="pixel" aria-label="こすった部分だけ消す">部分</button>
+          <button class="image-edit-segment-btn" type="button" data-eraser-type="object" aria-label="触れた一筆をまとめて消す">オブジェクト</button>
+        </div>
+        <label id="imageEditPenSizeWrap" class="image-edit-pen-control">
+          <span>太さ</span>
+          <input id="imageEditPenSize" type="range" min="2" max="40" value="8" aria-label="ペンの太さ">
+        </label>
+      </div>
       <div class="crop-canvas-wrap">
         <canvas id="cropCanvas"></canvas>
       </div>
@@ -593,6 +704,14 @@
             <button id="downloadMapPngBtn" class="settings-action-btn" type="button" title="マインドマップをPNG画像でダウンロード">
               <span class="btn-icon" aria-hidden="true">⬇</span>
               <span class="btn-label">PNG</span>
+            </button>
+            <button id="downloadMapSvgBtn" class="settings-action-btn" type="button" title="マインドマップをSVG画像でダウンロード">
+              <span class="btn-icon" aria-hidden="true">⬇</span>
+              <span class="btn-label">SVG</span>
+            </button>
+            <button id="downloadMapPdfBtn" class="settings-action-btn" type="button" title="マインドマップをPDFとして保存（印刷ダイアログで「PDFに保存」を選択）">
+              <span class="btn-icon" aria-hidden="true">⬇</span>
+              <span class="btn-label">PDF</span>
             </button>
           </div>
         </div>
@@ -834,6 +953,7 @@
   <div id="contextMenu" class="context-menu" hidden>
     <button class="ctx-item" data-action="rename">✏️　名前を変更</button>
     <button class="ctx-item" data-action="add-child">＋　メモを追加</button>
+    <button class="ctx-item" data-action="add-todo">📋　TODOに追加</button>
     <button class="ctx-item" data-action="convert-mindmap">⇄　マインドマップと同期</button>
     <button class="ctx-item" data-action="toggle-check">✓　チェックする</button>
     <button class="ctx-item" data-action="toggle-pin">📌　ピン留め</button>
@@ -975,6 +1095,21 @@
           </span>
           <span class="app-management-menu-arrow" aria-hidden="true">›</span>
         </button>
+
+        <a id="appHomeLink" class="app-management-menu-btn" href="{{ url_for('seo_landing') }}">
+          <span class="app-management-menu-icon" aria-hidden="true">
+            <svg class="app-management-menu-svg" viewBox="0 0 64 64" focusable="false">
+              <path d="M10 32 32 12 54 32"></path>
+              <path d="M16 28v24h32V28"></path>
+              <path d="M27 52V38h10v14"></path>
+            </svg>
+          </span>
+          <span>
+            <strong>ホームページ</strong>
+            <small>{{ site_name }}の紹介サイトへ</small>
+          </span>
+          <span class="app-management-menu-arrow" aria-hidden="true">›</span>
+        </a>
       </div>
     </section>
 

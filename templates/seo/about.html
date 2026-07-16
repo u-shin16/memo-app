@@ -1,0 +1,26 @@
+{% extends "seo_base.html" %}
+
+{% block title %}運営者情報｜{{ site_name }}{% endblock %}
+{% block description %}{{ site_name }}の運営者情報です。開発の目的やお問い合わせ方法について紹介しています。{% endblock %}
+
+{% block content %}
+<section class="seo-main">
+  <h1>運営者情報</h1>
+
+  <h2>{{ site_name }}について</h2>
+  <p>
+    {{ site_name }}は、頭の中のアイデアやタスクを階層型のメモとマインドマップで整理できる無料アプリです。
+    「メモが増えるほど探しにくくなる」「マインドマップとメモを別々のツールで管理するのが面倒」といった悩みを解決するために作られました。
+  </p>
+
+  <h2>運営者</h2>
+  <p>{{ operator_name }}</p>
+  <p><a href="{{ operator_site_url }}" target="_blank" rel="noopener noreferrer">{{ operator_name }} ホームページ</a></p>
+  <p><a href="{{ operator_profile_url }}" target="_blank" rel="noopener noreferrer">運営者プロフィール</a></p>
+
+  <h2>お問い合わせ</h2>
+  <p>
+    ご意見・不具合の報告・追加してほしい機能などがありましたら、<a href="{{ url_for('contact') }}">お問い合わせページ</a>からお気軽にご連絡ください。
+  </p>
+</section>
+{% endblock %}

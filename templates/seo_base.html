@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}{{ site_name }}{% endblock %}</title>
+  <meta name="description" content="{% block description %}{{ site_name }}{% endblock %}">
+  <meta name="robots" content="index, follow">
+  <link rel="canonical" href="{% block canonical %}{{ canonical_url }}{% endblock %}">
+
+  <link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('static', filename='icons/favicon-32.png') }}">
+  <link rel="icon" type="image/png" sizes="16x16" href="{{ url_for('static', filename='icons/favicon-16.png') }}">
+  <link rel="apple-touch-icon" sizes="180x180" href="{{ url_for('static', filename='icons/apple-touch-icon.png') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/seo.css') }}">
+
+  <meta property="og:title" content="{% block og_title %}{{ self.title() }}{% endblock %}">
+  <meta property="og:description" content="{% block og_description %}{{ self.description() }}{% endblock %}">
+  <meta property="og:type" content="{% block og_type %}website{% endblock %}">
+  <meta property="og:url" content="{% block og_url %}{{ canonical_url }}{% endblock %}">
+  <meta property="og:image" content="{{ site_url }}{{ url_for('static', filename='ogp.png') }}">
+  <meta property="og:site_name" content="{{ site_name }}">
+  <meta property="og:locale" content="ja_JP">
+
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="{{ self.title() }}">
+  <meta name="twitter:description" content="{{ self.description() }}">
+  <meta name="twitter:image" content="{{ site_url }}{{ url_for('static', filename='ogp.png') }}">
+
+  {% block structured_data %}{% endblock %}
+  {% block extra_head %}{% endblock %}
+</head>
+<body class="seo-page">
+  <header class="seo-header">
+    {% block header_back %}
+    <button type="button" class="seo-header-back" onclick="history.length > 1 ? history.back() : location.assign('{{ url_for('seo_landing') }}')">← 戻る</button>
+    {% endblock %}
+    <a class="seo-header-logo" href="{{ url_for('seo_landing') }}">
+      <img src="{{ url_for('static', filename='icons/app-icon-192.png') }}" alt="">
+      <span>{{ site_name }}</span>
+    </a>
+    <a class="seo-header-cta" href="{{ url_for('index') }}">アプリを使う</a>
+  </header>
+
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+
+  {% block cta %}
+  <section class="seo-cta-box">
+    <p>「{{ site_name }}」を使ってみる</p>
+    <a href="{{ url_for('index') }}">今すぐ無料で使ってみる →</a>
+  </section>
+  {% endblock %}
+
+  <nav class="seo-related" aria-label="関連ページ">
+    <h2>関連ページ</h2>
+    <div class="seo-related-groups">
+      <div class="seo-related-group">
+        <h3>使い方について</h3>
+        <ul>
+          <li><a href="{{ url_for('how_to_use') }}">使い方ガイド</a></li>
+          <li><a href="{{ url_for('faq') }}">よくある質問</a></li>
+        </ul>
+      </div>
+      <div class="seo-related-group">
+        <h3>お悩み別ページ</h3>
+        <ul>
+          {% for page in keyword_pages %}
+          <li><a href="{{ url_for('keyword_page', slug=page.slug) }}">{{ page.label }}</a></li>
+          {% endfor %}
+        </ul>
+      </div>
+      <div class="seo-related-group">
+        <h3>お役立ちブログ</h3>
+        <ul>
+          {% for post in blog_posts %}
+          <li><a href="{{ url_for('blog_post', slug=post.slug) }}">{{ post.title }}</a></li>
+          {% endfor %}
+        </ul>
+      </div>
+    </div>
+  </nav>
+
+  <footer class="seo-footer">
+    <div class="seo-footer-inner">
+      <div class="seo-footer-links">
+        <a href="{{ url_for('about') }}">運営者情報</a>
+        <a href="{{ url_for('privacy') }}">プライバシーポリシー</a>
+        <a href="{{ url_for('terms') }}">利用規約</a>
+        <a href="{{ url_for('contact') }}">お問い合わせ</a>
+      </div>
+      <p class="seo-footer-meta">© {{ current_year }} {{ operator_name }} / {{ site_name }}</p>
+    </div>
+  </footer>
+</body>
+</html>
