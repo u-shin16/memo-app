@@ -5782,8 +5782,14 @@ async function addNoteToTodoList(noteId) {
 async function toggleTodoDone(todoId) {
   const todo = state.todos.find(t => t.id === todoId);
   if (!todo) return;
+  const done = !todo.done;
   try {
-    const done = !todo.done;
+    const note = getNotes().find(n => n.id === todo.note_id);
+    if (note) {
+      if (blockIfGuestReadOnly()) return;
+      if (!await ensureNoteAccess(todo.note_id, { keepLocked: true })) return;
+      await updateNote(todo.note_id, { checked: done });
+    }
     await todosCollection().doc(todoId).set({ done }, { merge: true });
     todo.done = done;
     renderTodoList();
