@@ -4998,3 +4998,44 @@ body.has-mindmap-memo-fullscreen {
 }
 
 /* ── /アカウントメニュー ──────────────────────────────────── */
+
+@media (max-width: 860px) {
+  .note-head {
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    align-items: center;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+
+  .note-head::-webkit-scrollbar {
+    display: none;
+  }
+
+  .note-nav-btns,
+  .note-head-actions {
+    flex: 0 0 auto;
+    gap: 4px;
+  }
+
+  .note-head-actions {
+    margin-left: 0;
+  }
+
+  .note-head .mindmap-tool-btn,
+  .note-head .mindmap-switch-btn {
+    flex: 0 0 42px;
+    width: 42px;
+    min-width: 42px;
+    min-height: 42px;
+    padding: 8px 4px;
+    flex-direction: row;
+  }
+
+  .note-head .btn-label,
+  .note-head .mobile-menu-text {
+    display: none;
+  }
+}

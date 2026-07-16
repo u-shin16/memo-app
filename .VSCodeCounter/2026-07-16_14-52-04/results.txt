@@ -1,0 +1,76 @@
+Date : 2026-07-16 14:52:04
+Directory : /Users/yushin/seisaku_app/memo
+Total : 33 files,  20124 codes, 285 comments, 2581 blanks, all 22990 lines
+
+Languages
++------------------+------------+------------+------------+------------+------------+
+| language         | files      | code       | comment    | blank      | total      |
++------------------+------------+------------+------------+------------+------------+
+| JavaScript       |          5 |     12,050 |        184 |      1,304 |     13,538 |
+| PostCSS          |          3 |      4,832 |         55 |        786 |      5,673 |
+| HTML             |         19 |      2,132 |         17 |        254 |      2,403 |
+| Python           |          3 |        926 |         29 |        180 |      1,135 |
+| Markdown         |          1 |        152 |          0 |         55 |        207 |
+| JSON             |          1 |         24 |          0 |          1 |         25 |
+| pip requirements |          1 |          8 |          0 |          1 |          9 |
++------------------+------------+------------+------------+------------+------------+
+
+Directories
++---------------------------------------------------------------------------------+------------+------------+------------+------------+------------+
+| path                                                                            | files      | code       | comment    | blank      | total      |
++---------------------------------------------------------------------------------+------------+------------+------------+------------+------------+
+| .                                                                               |         33 |     20,124 |        285 |      2,581 |     22,990 |
+| . (Files)                                                                       |          3 |        689 |          9 |        141 |        839 |
+| scripts                                                                         |          1 |        192 |         20 |         55 |        267 |
+| static                                                                          |          8 |     16,774 |        239 |      2,079 |     19,092 |
+| static (Files)                                                                  |          1 |         24 |          0 |          1 |         25 |
+| static/css                                                                      |          3 |      4,832 |         55 |        786 |      5,673 |
+| static/js                                                                       |          4 |     11,918 |        184 |      1,292 |     13,394 |
+| templates                                                                       |         19 |      2,132 |         17 |        254 |      2,403 |
+| templates (Files)                                                               |          3 |      1,340 |         17 |        121 |      1,478 |
+| templates/seo                                                                   |         16 |        792 |          0 |        133 |        925 |
+| templates/seo (Files)                                                           |          7 |        301 |          0 |         56 |        357 |
+| templates/seo/blog                                                              |          3 |        173 |          0 |         26 |        199 |
+| templates/seo/keywords                                                          |          6 |        318 |          0 |         51 |        369 |
+| tests                                                                           |          2 |        337 |          0 |         52 |        389 |
++---------------------------------------------------------------------------------+------------+------------+------------+------------+------------+
+
+Files
++---------------------------------------------------------------------------------+------------------+------------+------------+------------+------------+
+| filename                                                                        | language         | code       | comment    | blank      | total      |
++---------------------------------------------------------------------------------+------------------+------------+------------+------------+------------+
+| /Users/yushin/seisaku_app/memo/README.md                                        | Markdown         |        152 |          0 |         55 |        207 |
+| /Users/yushin/seisaku_app/memo/app.py                                           | Python           |        529 |          9 |         85 |        623 |
+| /Users/yushin/seisaku_app/memo/requirements.txt                                 | pip requirements |          8 |          0 |          1 |          9 |
+| /Users/yushin/seisaku_app/memo/scripts/migrate_to_firestore.py                  | Python           |        192 |         20 |         55 |        267 |
+| /Users/yushin/seisaku_app/memo/static/css/auth-action.css                       | PostCSS          |        133 |          0 |         21 |        154 |
+| /Users/yushin/seisaku_app/memo/static/css/seo.css                               | PostCSS          |        429 |         10 |         79 |        518 |
+| /Users/yushin/seisaku_app/memo/static/css/style.css                             | PostCSS          |      4,270 |         45 |        686 |      5,001 |
+| /Users/yushin/seisaku_app/memo/static/js/auth_action.js                         | JavaScript       |         58 |          0 |          9 |         67 |
+| /Users/yushin/seisaku_app/memo/static/js/firebase-config.js                     | JavaScript       |         10 |          0 |          2 |         12 |
+| /Users/yushin/seisaku_app/memo/static/js/note-mindmap-sync.js                   | JavaScript       |        221 |          0 |         21 |        242 |
+| /Users/yushin/seisaku_app/memo/static/js/script.js                              | JavaScript       |     11,629 |        184 |      1,260 |     13,073 |
+| /Users/yushin/seisaku_app/memo/static/site.webmanifest                          | JSON             |         24 |          0 |          1 |         25 |
+| /Users/yushin/seisaku_app/memo/templates/auth_action.html                       | HTML             |         51 |          0 |          5 |         56 |
+| /Users/yushin/seisaku_app/memo/templates/index.html                             | HTML             |      1,201 |         17 |        107 |      1,325 |
+| /Users/yushin/seisaku_app/memo/templates/seo/about.html                         | HTML             |         21 |          0 |          6 |         27 |
+| /Users/yushin/seisaku_app/memo/templates/seo/blog/ai-brainstorming-tips.html    | HTML             |         59 |          0 |          9 |         68 |
+| /Users/yushin/seisaku_app/memo/templates/seo/blog/mindmap-vs-memo.html          | HTML             |         59 |          0 |          9 |         68 |
+| /Users/yushin/seisaku_app/memo/templates/seo/blog/organize-scattered-ideas.html | HTML             |         55 |          0 |          8 |         63 |
+| /Users/yushin/seisaku_app/memo/templates/seo/contact.html                       | HTML             |         24 |          0 |          5 |         29 |
+| /Users/yushin/seisaku_app/memo/templates/seo/faq.html                           | HTML             |         20 |          0 |          5 |         25 |
+| /Users/yushin/seisaku_app/memo/templates/seo/how_to_use.html                    | HTML             |         54 |          0 |         10 |         64 |
+| /Users/yushin/seisaku_app/memo/templates/seo/keywords/ai-memo-generator.html    | HTML             |         52 |          0 |          8 |         60 |
+| /Users/yushin/seisaku_app/memo/templates/seo/keywords/collaborative-memo.html   | HTML             |         48 |          0 |          8 |         56 |
+| /Users/yushin/seisaku_app/memo/templates/seo/keywords/free-mindmap.html         | HTML             |         52 |          0 |          9 |         61 |
+| /Users/yushin/seisaku_app/memo/templates/seo/keywords/hierarchical-memo.html    | HTML             |         55 |          0 |          8 |         63 |
+| /Users/yushin/seisaku_app/memo/templates/seo/keywords/organize-ideas.html       | HTML             |         55 |          0 |          9 |         64 |
+| /Users/yushin/seisaku_app/memo/templates/seo/keywords/structured-notes.html     | HTML             |         56 |          0 |          9 |         65 |
+| /Users/yushin/seisaku_app/memo/templates/seo/landing.html                       | HTML             |         60 |          0 |          8 |         68 |
+| /Users/yushin/seisaku_app/memo/templates/seo/privacy.html                       | HTML             |         65 |          0 |         11 |         76 |
+| /Users/yushin/seisaku_app/memo/templates/seo/terms.html                         | HTML             |         57 |          0 |         11 |         68 |
+| /Users/yushin/seisaku_app/memo/templates/seo_base.html                          | HTML             |         88 |          0 |          9 |         97 |
+| /Users/yushin/seisaku_app/memo/tests/note-mindmap-sync.test.js                  | JavaScript       |        132 |          0 |         12 |        144 |
+| /Users/yushin/seisaku_app/memo/tests/test_ai_file_upload.py                     | Python           |        205 |          0 |         40 |        245 |
+| Total                                                                           |                  |     20,124 |        285 |      2,581 |     22,990 |
++---------------------------------------------------------------------------------+------------------+------------+------------+------------+------------+

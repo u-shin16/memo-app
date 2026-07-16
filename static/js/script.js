@@ -3124,6 +3124,33 @@ function createGoogleAuthProvider() {
   return provider;
 }
 
+function handleGoogleSignInError(err) {
+  if (err?.code === "auth/account-exists-with-different-credential") {
+    // 同じメールで既にパスワード登録済み。新規の別アカウントにはせず、
+    // 既存アカウントへGoogleを連携できるよう促す（データを保持するため）。
+    const email = err.email || err.customData?.email || null;
+    const pendingCred = getGoogleCredentialFromAuthError(err);
+    if (email && pendingCred) {
+      requestGoogleAccountLink(email, pendingCred);
+    } else {
+      showAuthError(translateAuthError(err));
+    }
+    return;
+  }
+
+  if (err?.code !== "auth/popup-closed-by-user" && err?.code !== "auth/cancelled-popup-request") {
+    showAuthError(translateAuthError(err));
+  }
+}
+
+async function handleGoogleRedirectResult() {
+  try {
+    await auth.getRedirectResult();
+  } catch (err) {
+    handleGoogleSignInError(err);
+  }
+}
+
 async function continueAfterGoogleLink(user) {
   if (!user) return;
   await user.reload();
@@ -12913,23 +12940,11 @@ if (auth) {
     authFlowInProgress = true;
     try {
       await applyAuthPersistence();
-      await auth.signInWithPopup(createGoogleAuthProvider());
+      await auth.signInWithRedirect(createGoogleAuthProvider());
       // ここから先はGoogleのメールが検証済みなので、確認メール待ち画面には行かず
       // onAuthStateChangedが通常のアプリ起動フローへ進める。
     } catch (err) {
-      if (err?.code === "auth/account-exists-with-different-credential") {
-        // 同じメールで既にパスワード登録済み。新規の別アカウントにはせず、
-        // 既存アカウントへGoogleを連携できるよう促す（データを保持するため）。
-        const email = err.email || err.customData?.email || null;
-        const pendingCred = getGoogleCredentialFromAuthError(err);
-        if (email && pendingCred) {
-          requestGoogleAccountLink(email, pendingCred);
-        } else {
-          showAuthError(translateAuthError(err));
-        }
-      } else if (err?.code !== "auth/popup-closed-by-user" && err?.code !== "auth/cancelled-popup-request") {
-        showAuthError(translateAuthError(err));
-      }
+      handleGoogleSignInError(err);
     } finally {
       authFlowInProgress = false;
       els.authGoogleBtn.disabled = false;
@@ -13027,6 +13042,8 @@ if (auth) {
   els.authVerifyRefreshBtn.addEventListener("click", handleRefreshStatus);
   els.authVerifyLogoutBtn.addEventListener("click", handleLogout);
   els.authVerifyDeleteBtn.addEventListener("click", handleDeleteUnverifiedAccount);
+
+  void handleGoogleRedirectResult();
 }
 
 // ── Boot ──────────────────────────────────────────────────────────────────────

@@ -1,0 +1,35 @@
+"filename", "language", "HTML", "Python", "JavaScript", "pip requirements", "JSON", "PostCSS", "Markdown", "comment", "blank", "total"
+"/Users/yushin/seisaku_app/memo/README.md", "Markdown", 0, 0, 0, 0, 0, 0, 152, 0, 55, 207
+"/Users/yushin/seisaku_app/memo/app.py", "Python", 0, 529, 0, 0, 0, 0, 0, 9, 85, 623
+"/Users/yushin/seisaku_app/memo/requirements.txt", "pip requirements", 0, 0, 0, 8, 0, 0, 0, 0, 1, 9
+"/Users/yushin/seisaku_app/memo/scripts/migrate_to_firestore.py", "Python", 0, 192, 0, 0, 0, 0, 0, 20, 55, 267
+"/Users/yushin/seisaku_app/memo/static/css/auth-action.css", "PostCSS", 0, 0, 0, 0, 0, 133, 0, 0, 21, 154
+"/Users/yushin/seisaku_app/memo/static/css/seo.css", "PostCSS", 0, 0, 0, 0, 0, 429, 0, 10, 79, 518
+"/Users/yushin/seisaku_app/memo/static/css/style.css", "PostCSS", 0, 0, 0, 0, 0, 4270, 0, 45, 686, 5001
+"/Users/yushin/seisaku_app/memo/static/js/auth_action.js", "JavaScript", 0, 0, 58, 0, 0, 0, 0, 0, 9, 67
+"/Users/yushin/seisaku_app/memo/static/js/firebase-config.js", "JavaScript", 0, 0, 10, 0, 0, 0, 0, 0, 2, 12
+"/Users/yushin/seisaku_app/memo/static/js/note-mindmap-sync.js", "JavaScript", 0, 0, 221, 0, 0, 0, 0, 0, 21, 242
+"/Users/yushin/seisaku_app/memo/static/js/script.js", "JavaScript", 0, 0, 11629, 0, 0, 0, 0, 184, 1260, 13073
+"/Users/yushin/seisaku_app/memo/static/site.webmanifest", "JSON", 0, 0, 0, 0, 24, 0, 0, 0, 1, 25
+"/Users/yushin/seisaku_app/memo/templates/auth_action.html", "HTML", 51, 0, 0, 0, 0, 0, 0, 0, 5, 56
+"/Users/yushin/seisaku_app/memo/templates/index.html", "HTML", 1201, 0, 0, 0, 0, 0, 0, 17, 107, 1325
+"/Users/yushin/seisaku_app/memo/templates/seo/about.html", "HTML", 21, 0, 0, 0, 0, 0, 0, 0, 6, 27
+"/Users/yushin/seisaku_app/memo/templates/seo/blog/ai-brainstorming-tips.html", "HTML", 59, 0, 0, 0, 0, 0, 0, 0, 9, 68
+"/Users/yushin/seisaku_app/memo/templates/seo/blog/mindmap-vs-memo.html", "HTML", 59, 0, 0, 0, 0, 0, 0, 0, 9, 68
+"/Users/yushin/seisaku_app/memo/templates/seo/blog/organize-scattered-ideas.html", "HTML", 55, 0, 0, 0, 0, 0, 0, 0, 8, 63
+"/Users/yushin/seisaku_app/memo/templates/seo/contact.html", "HTML", 24, 0, 0, 0, 0, 0, 0, 0, 5, 29
+"/Users/yushin/seisaku_app/memo/templates/seo/faq.html", "HTML", 20, 0, 0, 0, 0, 0, 0, 0, 5, 25
+"/Users/yushin/seisaku_app/memo/templates/seo/how_to_use.html", "HTML", 54, 0, 0, 0, 0, 0, 0, 0, 10, 64
+"/Users/yushin/seisaku_app/memo/templates/seo/keywords/ai-memo-generator.html", "HTML", 52, 0, 0, 0, 0, 0, 0, 0, 8, 60
+"/Users/yushin/seisaku_app/memo/templates/seo/keywords/collaborative-memo.html", "HTML", 48, 0, 0, 0, 0, 0, 0, 0, 8, 56
+"/Users/yushin/seisaku_app/memo/templates/seo/keywords/free-mindmap.html", "HTML", 52, 0, 0, 0, 0, 0, 0, 0, 9, 61
+"/Users/yushin/seisaku_app/memo/templates/seo/keywords/hierarchical-memo.html", "HTML", 55, 0, 0, 0, 0, 0, 0, 0, 8, 63
+"/Users/yushin/seisaku_app/memo/templates/seo/keywords/organize-ideas.html", "HTML", 55, 0, 0, 0, 0, 0, 0, 0, 9, 64
+"/Users/yushin/seisaku_app/memo/templates/seo/keywords/structured-notes.html", "HTML", 56, 0, 0, 0, 0, 0, 0, 0, 9, 65
+"/Users/yushin/seisaku_app/memo/templates/seo/landing.html", "HTML", 60, 0, 0, 0, 0, 0, 0, 0, 8, 68
+"/Users/yushin/seisaku_app/memo/templates/seo/privacy.html", "HTML", 65, 0, 0, 0, 0, 0, 0, 0, 11, 76
+"/Users/yushin/seisaku_app/memo/templates/seo/terms.html", "HTML", 57, 0, 0, 0, 0, 0, 0, 0, 11, 68
+"/Users/yushin/seisaku_app/memo/templates/seo_base.html", "HTML", 88, 0, 0, 0, 0, 0, 0, 0, 9, 97
+"/Users/yushin/seisaku_app/memo/tests/note-mindmap-sync.test.js", "JavaScript", 0, 0, 132, 0, 0, 0, 0, 0, 12, 144
+"/Users/yushin/seisaku_app/memo/tests/test_ai_file_upload.py", "Python", 0, 205, 0, 0, 0, 0, 0, 0, 40, 245
+"Total", "-", 2132, 926, 12050, 8, 24, 4832, 152, 285, 2581, 22990

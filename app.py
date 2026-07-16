@@ -10,7 +10,7 @@ from pathlib import Path
 from google import genai
 from google.genai import types as genai_types
 from dotenv import load_dotenv
-from flask import Flask, Response, abort, render_template, request, jsonify
+from flask import Flask, Response, abort, jsonify, make_response, render_template, request
 from docx import Document
 from openpyxl import load_workbook
 from pypdf import PdfReader
@@ -146,6 +146,12 @@ def get_public_pages() -> list[dict]:
 
 @app.context_processor
 def inject_seo_globals():
+    def static_version(filename: str) -> int:
+        try:
+            return int((BASE_DIR / "static" / filename).stat().st_mtime)
+        except OSError:
+            return 0
+
     return {
         "site_name": SITE_NAME,
         "site_url": SITE_URL,
@@ -157,6 +163,7 @@ def inject_seo_globals():
         "blog_posts": BLOG_POSTS,
         "canonical_url": f"{SITE_URL}{request.path}",
         "current_year": datetime.now(tz=timezone.utc).year,
+        "static_version": static_version,
     }
 
 _USE_VERTEX_AI = os.getenv("USE_VERTEX_AI", "false").lower() == "true"
@@ -427,12 +434,16 @@ def build_ai_contents(prompt_template: str, prompt: str, image_part: genai_types
 
 @app.get("/app")
 def index():
-    return render_template("index.html")
+    response = make_response(render_template("index.html"))
+    response.headers["Cache-Control"] = "no-store, max-age=0"
+    return response
 
 
 @app.get("/auth/action")
 def auth_action():
-    return render_template("auth_action.html")
+    response = make_response(render_template("auth_action.html"))
+    response.headers["Cache-Control"] = "no-store, max-age=0"
+    return response
 
 
 # ── SEOページ ─────────────────────────────────────────────────────────────────
