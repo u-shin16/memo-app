@@ -1204,6 +1204,46 @@ function clearSavedCollabRoom(uid = state.uid) {
   if (key) localStorage.removeItem(key);
 }
 
+function resetCollabRoomState() {
+  state.collabRoomId = null;
+  state.collabRoomLabel = "";
+  state.collabRoomRole = null;
+}
+
+async function shouldDropRestoredCollabRoom(uid, roomId) {
+  if (!uid || !roomId) return false;
+  const userRef = db.collection("users").doc(uid);
+  const roomRef = db.collection("collabRooms").doc(roomId);
+
+  try {
+    const [roomSnap, memberSnap] = await Promise.all([
+      roomRef.get(),
+      roomRef.collection("members").doc(uid).get(),
+    ]);
+    if (!roomSnap.exists || !memberSnap.exists) return true;
+
+    const [personalNotesSnap, roomNotesSnap, roomMapsSnap] = await Promise.all([
+      userRef.collection("notes").limit(1).get(),
+      roomRef.collection("notes").limit(1).get(),
+      roomRef.collection("mindmaps").limit(1).get(),
+    ]);
+    return !personalNotesSnap.empty && roomNotesSnap.empty && roomMapsSnap.empty;
+  } catch (err) {
+    console.warn("[collab] 保存済み共同ルームを復元できないため個人メモへ戻します", err);
+    return true;
+  }
+}
+
+async function restorePersonalWorkspaceIfSavedCollabIsStale(uid) {
+  if (!state.collabRoomId) return false;
+  const stale = await shouldDropRestoredCollabRoom(uid, state.collabRoomId);
+  if (!stale) return false;
+  clearSavedCollabRoom(uid);
+  resetCollabRoomState();
+  showToast("個人メモを開きました。");
+  return true;
+}
+
 function setCollabError(message = "") {
   if (!els.appCollabError) return;
   els.appCollabError.textContent = message;
@@ -2711,6 +2751,7 @@ async function loadSignedInWorkspace(user) {
   }
   state.uid = user.uid;
   await restoreSavedCollabRoom(user.uid);
+  await restorePersonalWorkspaceIfSavedCollabIsStale(user.uid);
   [state.templates, state.mindMapTemplates, state.todos] = await Promise.all([
     ensureOfficialTemplates(user.uid),
     ensureOfficialMindMapTemplates(user.uid),
