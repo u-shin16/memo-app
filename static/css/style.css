@@ -650,6 +650,15 @@ body.has-large-editor-open .note-head {
   color: var(--danger);
 }
 
+.settings-action-btn.is-added,
+.settings-action-btn.is-added:disabled {
+  border-color: #86efac;
+  background: #f0fdf4;
+  color: #166534;
+  opacity: 1;
+  cursor: default;
+}
+
 .settings-action-btn:disabled {
   cursor: not-allowed;
   opacity: 0.42;
@@ -1637,6 +1646,15 @@ body.has-large-editor-open .note-head {
   font-size: 11px;
   opacity: 0.5;
   pointer-events: none;
+}
+
+.ctx-item-added,
+.ctx-item-added:disabled {
+  background: #f0fdf4;
+  color: #166534;
+  font-weight: 800;
+  opacity: 1;
+  cursor: default;
 }
 
 .ctx-danger {
@@ -3829,21 +3847,37 @@ body.has-mindmap-memo-fullscreen {
 }
 
 .todo-checkbox {
+  width: 28px;
+  height: 28px;
   flex-shrink: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
   font-size: 16px;
   line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.todo-checkbox:hover,
+.todo-checkbox:focus-visible {
+  background: var(--line);
+  outline: none;
 }
 
 .todo-list-item .mindmap-list-open {
   position: relative;
-  padding-left: 8px;
+  padding-left: 4px;
 }
 
 .todo-hierarchy {
   width: 100%;
   max-width: 100%;
   box-sizing: border-box;
-  padding-left: 28px;
+  padding-left: 0;
   overflow: hidden;
   color: var(--muted);
   font-size: 11px;

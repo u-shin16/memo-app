@@ -206,6 +206,7 @@ const els = {
   noteAiGenerateBtn: document.getElementById("noteAiGenerateBtn"),
   noteAiError:      document.getElementById("noteAiError"),
   checkBtn:         document.getElementById("checkBtn"),
+  memoTodoBtn:      document.getElementById("memoTodoBtn"),
   memoSettingsBtn:  document.getElementById("memoSettingsBtn"),
   memoSettingsPanel: document.getElementById("memoSettingsPanel"),
   memoSettingsClose: document.getElementById("memoSettingsClose"),
@@ -3460,9 +3461,7 @@ const OFFICIAL_TEMPLATES = [
       content:  "開発中のアイデア、実装、改善案をまとめるテンプレートです。",
       children: [
         { title: "アイデア",     content: "今後実装したいものや、思いついたことを書き留めます。", children: [] },
-        { title: "実装メモ",     content: "作業した内容、判断したこと、参考リンクを残します。", children: [] },
         { title: "改善案",       content: "使いにくい点や、直したい挙動を書き留めます。", children: [] },
-        { title: "不具合",       content: "再現手順、期待する動き、実際の動きをまとめます。", children: [] },
         { title: "リリースメモ", content: "公開前に確認することや、変更点をまとめます。", children: [] },
       ],
     },
@@ -5650,7 +5649,7 @@ async function deleteRootNoteFromList(noteId) {
 
 function updateTodoButton() {
   if (!els.noteTodoCount) return;
-  const pending = state.todos.filter(todo => !todo.done).length;
+  const pending = getVisibleTodos().filter(todo => !todo.done).length;
   els.noteTodoCount.textContent = String(pending);
   els.noteTodoCount.hidden = pending === 0;
 }
@@ -5659,19 +5658,74 @@ function getTodoNote(todo) {
   return getNotes().find(note => note.id === todo.note_id) ?? null;
 }
 
-function noteHierarchySortKey(note) {
-  if (!note) return "";
-  const notes = getNotes();
-  return getNoteAncestorChain(note.id).map(item => {
-    const parentId = item.parent_id ?? null;
-    const siblings = orderTreeChildren(
-      parentId,
-      notes.filter(candidate => (candidate.parent_id ?? null) === parentId),
-    );
-    const index = siblings.findIndex(candidate => candidate.id === item.id);
-    const order = String(index >= 0 ? index : 9999).padStart(4, "0");
-    return `${order}:${String(item.title || "無題").toLowerCase()}:${item.id}`;
-  }).join("/");
+function getTodosForNote(noteId) {
+  if (!noteId) return [];
+  return state.todos.filter(todo => todo.note_id === noteId);
+}
+
+function todoAddedSortKey(todo) {
+  return String(todo.created_at ?? "");
+}
+
+function compareTodoAddedAt(a, b) {
+  const createdDiff = todoAddedSortKey(b).localeCompare(todoAddedSortKey(a), "ja");
+  if (createdDiff !== 0) return createdDiff;
+  return String(b.id ?? "").localeCompare(String(a.id ?? ""), "ja");
+}
+
+function compareTodoRepresentative(a, b) {
+  if (Boolean(a.done) !== Boolean(b.done)) return a.done ? 1 : -1;
+  return compareTodoAddedAt(a, b);
+}
+
+function getTodoForNote(noteId) {
+  return getTodosForNote(noteId).sort(compareTodoRepresentative)[0] ?? null;
+}
+
+function getRelatedTodos(todo) {
+  if (!todo) return [];
+  return todo.note_id ? getTodosForNote(todo.note_id) : [todo];
+}
+
+function getVisibleTodos() {
+  const grouped = new Map();
+  state.todos.forEach(todo => {
+    const key = todo.note_id ? `note:${todo.note_id}` : `todo:${todo.id}`;
+    const current = grouped.get(key);
+    if (!current || compareTodoRepresentative(todo, current) < 0) {
+      grouped.set(key, todo);
+    }
+  });
+  return [...grouped.values()];
+}
+
+function updateMemoTodoButton() {
+  const btn = els.memoTodoBtn;
+  if (!btn) return;
+  const note = state.selectedId ? getNotes().find(n => n.id === state.selectedId) : null;
+  const existingTodo = note ? getTodoForNote(note.id) : null;
+  const readOnly = isGuestReadOnly();
+  const added = Boolean(existingTodo);
+
+  btn.classList.toggle("is-added", added);
+  btn.setAttribute("aria-pressed", String(added));
+
+  if (!note) {
+    btn.disabled = true;
+    btn.title = "メモを選択するとTODOに追加できます";
+    btn.setAttribute("aria-label", "TODO追加");
+    setButtonContent(btn, "📋", "TODO追加");
+  } else if (added) {
+    btn.disabled = true;
+    btn.title = "このメモはTODOに追加済みです";
+    btn.setAttribute("aria-label", "TODO追加済み");
+    setButtonContent(btn, "✓", "追加済み");
+  } else {
+    btn.disabled = readOnly;
+    btn.title = readOnly ? "ホストが閲覧専用に設定しています" : "選択中のメモをTODOに追加";
+    btn.setAttribute("aria-label", "TODO追加");
+    setButtonContent(btn, "📋", "TODO追加");
+  }
 }
 
 function getTodoDisplayContext(todo) {
@@ -5700,17 +5754,7 @@ function getTodoDisplayContext(todo) {
 }
 
 function sortedTodos() {
-  return [...state.todos].sort((a, b) => {
-    const noteA = getTodoNote(a);
-    const noteB = getTodoNote(b);
-    if (noteA && noteB) {
-      const hierarchyDiff = noteHierarchySortKey(noteA).localeCompare(noteHierarchySortKey(noteB), "ja");
-      if (hierarchyDiff !== 0) return hierarchyDiff;
-    } else if (noteA || noteB) {
-      return noteA ? -1 : 1;
-    }
-    return String(b.created_at ?? "").localeCompare(String(a.created_at ?? ""));
-  });
+  return getVisibleTodos().sort(compareTodoAddedAt);
 }
 
 function renderTodoList() {
@@ -5721,7 +5765,7 @@ function renderTodoList() {
   if (todos.length === 0) {
     const empty = document.createElement("li");
     empty.className = "note-list-empty";
-    empty.textContent = "TODOはまだありません。メモを右クリックして「TODOに追加」を選んでください。";
+    empty.textContent = "TODOはまだありません。メモ設定または右クリックから「TODO追加」を選んでください。";
     els.noteTodoItems.appendChild(empty);
     updateTodoButton();
     return;
@@ -5735,20 +5779,26 @@ function renderTodoList() {
     item.classList.toggle("has-parent", depth > 0);
     item.dataset.id = todo.id;
 
+    const checkbox = document.createElement("button");
+    checkbox.type = "button";
+    checkbox.className = "todo-checkbox";
+    checkbox.dataset.action = "toggle";
+    checkbox.title = todo.done ? "未完了に戻す" : "完了にする";
+    checkbox.setAttribute("aria-label", `「${label}」を${todo.done ? "未完了に戻す" : "完了にする"}`);
+    checkbox.setAttribute("aria-pressed", String(Boolean(todo.done)));
+    checkbox.textContent = todo.done ? "☑" : "☐";
+    item.appendChild(checkbox);
+
     const openBtn = document.createElement("button");
     openBtn.type = "button";
     openBtn.className = "mindmap-list-open";
-    openBtn.dataset.action = "toggle";
+    openBtn.dataset.action = "open-note";
     openBtn.title = fullPath;
+    openBtn.setAttribute("aria-label", `「${label}」のメモを開く`);
+    openBtn.disabled = !note;
 
     const titleLine = document.createElement("span");
     titleLine.className = "mindmap-list-title-line";
-
-    const checkbox = document.createElement("span");
-    checkbox.className = "todo-checkbox";
-    checkbox.setAttribute("aria-hidden", "true");
-    checkbox.textContent = todo.done ? "☑" : "☐";
-    titleLine.appendChild(checkbox);
 
     const title = document.createElement("span");
     title.className = "mindmap-list-title";
@@ -5765,16 +5815,6 @@ function renderTodoList() {
 
     const actions = document.createElement("div");
     actions.className = "mindmap-list-actions";
-
-    const openNoteBtn = document.createElement("button");
-    openNoteBtn.type = "button";
-    openNoteBtn.className = "mindmap-list-icon-btn";
-    openNoteBtn.dataset.action = "open-note";
-    openNoteBtn.title = "メモを開く";
-    openNoteBtn.setAttribute("aria-label", `「${label}」のメモを開く`);
-    openNoteBtn.textContent = "↗";
-    openNoteBtn.disabled = !note;
-    actions.appendChild(openNoteBtn);
 
     const deleteBtn = document.createElement("button");
     deleteBtn.type = "button";
@@ -5831,6 +5871,14 @@ async function addNoteToTodoList(noteId) {
   if (blockIfGuestReadOnly()) return;
   const note = getNotes().find(n => n.id === noteId);
   if (!note) return;
+  const existingTodo = getTodoForNote(noteId);
+  if (existingTodo) {
+    if (!els.noteTodoPanel?.hidden) renderTodoList();
+    updateTodoButton();
+    updateMemoTodoButton();
+    showToast("このメモはすでにTODOに追加済みです。");
+    return;
+  }
   try {
     const todo = {
       id:         makeId(),
@@ -5843,6 +5891,7 @@ async function addNoteToTodoList(noteId) {
     state.todos.push(todo);
     if (!els.noteTodoPanel?.hidden) renderTodoList();
     updateTodoButton();
+    updateMemoTodoButton();
     showToast("TODOに追加しました。");
   } catch (e) { showToast(e.message); }
 }
@@ -5851,6 +5900,7 @@ async function toggleTodoDone(todoId) {
   const todo = state.todos.find(t => t.id === todoId);
   if (!todo) return;
   const done = !todo.done;
+  const relatedTodos = getRelatedTodos(todo);
   try {
     const note = getNotes().find(n => n.id === todo.note_id);
     if (note) {
@@ -5858,17 +5908,25 @@ async function toggleTodoDone(todoId) {
       if (!await ensureNoteAccess(todo.note_id, { keepLocked: true })) return;
       await updateNote(todo.note_id, { checked: done });
     }
-    await todosCollection().doc(todoId).set({ done }, { merge: true });
-    todo.done = done;
+    await Promise.all(relatedTodos.map(item => todosCollection().doc(item.id).set({ done }, { merge: true })));
+    relatedTodos.forEach(item => { item.done = done; });
+    renderTree();
+    if (state.selectedId === todo.note_id) renderEditor();
     renderTodoList();
+    updateMemoTodoButton();
   } catch (e) { showToast(e.message); }
 }
 
 async function deleteTodo(todoId) {
+  const todo = state.todos.find(t => t.id === todoId);
+  if (!todo) return;
+  const relatedTodos = getRelatedTodos(todo);
+  const relatedIds = new Set(relatedTodos.map(item => item.id));
   try {
-    await todosCollection().doc(todoId).delete();
-    state.todos = state.todos.filter(t => t.id !== todoId);
+    await Promise.all(relatedTodos.map(item => todosCollection().doc(item.id).delete()));
+    state.todos = state.todos.filter(t => !relatedIds.has(t.id));
     renderTodoList();
+    updateMemoTodoButton();
   } catch (e) { showToast(e.message); }
 }
 
@@ -6085,6 +6143,7 @@ function renderEditor() {
     els.deleteBtn.disabled = true;
     setLargeEditorOpen(false);
     if (els.noteToMindMapBtn) els.noteToMindMapBtn.disabled = true;
+    updateMemoTodoButton();
     setMemoFormatUi({ color: MEMO_DEFAULT_TEXT_COLOR, strike: false, headingLevel: "normal" });
     setMemoFormatEnabled(false);
     updateEmptyState();
@@ -6110,6 +6169,7 @@ function renderEditor() {
       ? "共同作業中、マインドマップとの同期はホストだけができます"
       : "選択中のメモをマインドマップと同期";
   }
+  updateMemoTodoButton();
   setMemoFormatEnabled(!readOnly);
   setMemoFormatUi({ color: MEMO_DEFAULT_TEXT_COLOR, strike: false, headingLevel: "normal" });
   els.contentInput.dataset.placeholder = "ここにメモを書いてください";
@@ -6626,8 +6686,8 @@ function renderTemplateItem(t) {
 
   const applyBtn = document.createElement("button");
   applyBtn.className   = "template-action-btn";
-  applyBtn.title       = "このテンプレートを親メモとして追加";
-  applyBtn.setAttribute("aria-label", "このテンプレートを親メモとして追加");
+  applyBtn.title       = "このテンプレートを今開いている親メモの直下に追加";
+  applyBtn.setAttribute("aria-label", "このテンプレートを今開いている親メモの直下に追加");
   applyBtn.dataset.action = "apply";
   setButtonContent(applyBtn, "＋", "追加する");
 
@@ -7148,22 +7208,29 @@ function startTemplateRename(item, templateId) {
 
 async function applyTemplate(templateId) {
   try {
-    if (blockNewRootMemoInCollab()) return;
+    if (blockIfGuestReadOnly()) return;
     const template = state.templates.find(t => t.id === templateId);
     if (!template) throw new Error("テンプレートが見つかりません。");
 
-    const created = createNotesFromTemplate(template.tree, null, nextOrderForNewNote(null));
+    const selectedRootId = getSelectedRootNoteId();
+    const selectedRoot = selectedRootId ? getNotes().find(note => note.id === selectedRootId) : null;
+    const parentId = selectedRoot?.id ?? null;
+
+    if (parentId === null && blockNewRootMemoInCollab()) return;
+    if (parentId && !await ensureNoteAccess(parentId, { keepLocked: true })) return;
+
+    const created = createNotesFromTemplate(template.tree, parentId, nextOrderForNewNote(parentId));
     created[0].title = String(template.name || "新しいメモ").slice(0, 120);
 
-    const batch = db.batch();
-    const ref   = notesCollection();
-    created.forEach(n => batch.set(ref.doc(n.id), n));
-    await batch.commit();
+    await writeNotesBatch(created);
 
     closeTemplatesPanel();
     appendNotesIfMissing(created);
+    if (parentId) state.expanded.add(parentId);
     selectNote(created[0].id);
-    showToast("テンプレートを親メモとして追加しました。");
+    showToast(parentId
+      ? `「${selectedRoot.title || "無題"}」の直下にテンプレートを追加しました。`
+      : "テンプレートを親メモとして追加しました。");
   } catch (e) { showToast(e.message); }
 }
 
@@ -11992,6 +12059,20 @@ function showCtxMenu(x, y, noteId) {
   if (checkItem) {
     checkItem.textContent = note?.checked ? "✓　チェックを外す" : "✓　チェックする";
   }
+  const todoBtn = els.contextMenu.querySelector('[data-action="add-todo"]');
+  if (todoBtn) {
+    const added = Boolean(note && getTodoForNote(note.id));
+    todoBtn.classList.toggle("ctx-item-added", added);
+    if (added) {
+      todoBtn.textContent = "✓　TODO追加済み";
+      todoBtn.disabled = true;
+      todoBtn.title = "このメモはTODOに追加済みです";
+    } else {
+      todoBtn.textContent = "📋　TODOに追加";
+      todoBtn.disabled = accessLocked || readOnly;
+      todoBtn.title = readOnly ? "ホストが閲覧専用に設定しています" : "";
+    }
+  }
   const siblingTopBtn = els.contextMenu.querySelector('[data-action="move-sibling-top"]');
   if (siblingTopBtn) {
     siblingTopBtn.hidden = false;
@@ -12425,6 +12506,7 @@ els.noteTodoItems?.addEventListener("click", e => {
     e.stopPropagation();
     void deleteTodo(todoId);
   } else if (action === "toggle") {
+    e.stopPropagation();
     void toggleTodoDone(todoId);
   }
 });
@@ -12461,6 +12543,10 @@ els.downloadNotesMdBtn?.addEventListener("click", () => { closeMemoSettingsPanel
 els.noteToMindMapBtn?.addEventListener("click", () => {
   closeMemoSettingsPanel();
   convertSelectedNoteToMindMap();
+});
+els.memoTodoBtn?.addEventListener("click", () => {
+  if (!state.selectedId) { showToast("先にメモを選択してください。"); return; }
+  addNoteToTodoList(state.selectedId);
 });
 els.checkBtn.addEventListener("click", () => {
   if (!state.selectedId) { showToast("先にメモを選択してください。"); return; }
