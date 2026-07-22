@@ -226,13 +226,17 @@ _MINDMAP_PROMPT = """\
 出力はJSONオブジェクトのみ（マークダウンコードブロックや説明文は不要）:
 {{
   "title": "ルートノードのタイトル",
-  "memo": "",
+  "memo": "テーマ全体の要約、背景、重要な観点を1〜3文で説明する",
   "children": [
     {{
       "title": "ブランチ",
-      "memo": "",
+      "memo": "このブランチで扱う内容、なぜ重要か、具体的に考えるポイントを1〜3文で説明する",
       "children": [
-        {{ "title": "サブ項目", "memo": "", "children": [] }}
+        {{
+          "title": "サブ項目",
+          "memo": "このサブ項目の具体的な内容、例、実行のヒントを1〜2文で説明する",
+          "children": []
+        }}
       ]
     }}
   ]
@@ -240,6 +244,9 @@ _MINDMAP_PROMPT = """\
 
 ルール:
 - 入力と同じ言語で出力する（日本語入力→日本語ノード）
+- すべてのノードで memo を必ず生成する（空文字は禁止）
+- memo はノード本文として読める自然な文章にする
+- 詳細説明・背景・具体例・注意点・次のアクションは title ではなく memo に書く
 - ルートタイトル：簡潔に（15文字以内推奨）
 - メインブランチ：3〜6個
 - 各ブランチのサブ項目：1〜4個
@@ -433,6 +440,45 @@ def build_ai_contents(prompt_template: str, prompt: str, image_part: genai_types
     if image_part is None:
         return formatted_prompt
     return [image_part, formatted_prompt]
+
+
+def _extract_mindmap_memo(node: dict, title: str, depth: int) -> str:
+    for key in ("memo", "content", "description", "summary", "detail", "details"):
+        value = node.get(key)
+        if isinstance(value, list):
+            text = "\n".join(str(item).strip() for item in value if str(item).strip())
+        else:
+            text = str(value or "").strip()
+        if text:
+            return text
+
+    if depth == 0:
+        return f"{title}の全体像、主要な観点、深掘りすべきポイントを整理します。"
+    return f"{title}について、目的・要点・具体例を整理するためのメモです。"
+
+
+def normalize_ai_mindmap_tree(tree):
+    if not isinstance(tree, dict):
+        raise ValueError("AIの出力形式が正しくありません。")
+
+    def normalize_node(node, depth=0):
+        if not isinstance(node, dict):
+            return None
+        title = str(node.get("title") or "トピック").strip()[:80] or "トピック"
+        children = node.get("children")
+        if not isinstance(children, list):
+            children = []
+        return {
+            "title": title,
+            "memo": _extract_mindmap_memo(node, title, depth),
+            "children": [
+                child
+                for child in (normalize_node(child_node, depth + 1) for child_node in children)
+                if child
+            ],
+        }
+
+    return normalize_node(tree)
 
 
 @app.get("/app")
@@ -666,7 +712,7 @@ def api_ai_mindmap():
             contents=build_ai_contents(_MINDMAP_PROMPT, prompt, image_part),
             config=genai_types.GenerateContentConfig(
                 response_mime_type="application/json",
-                max_output_tokens=2048,
+                max_output_tokens=4096,
                 temperature=0.7,
             ),
         )
@@ -674,7 +720,7 @@ def api_ai_mindmap():
         if raw.startswith("```"):
             lines = raw.splitlines()
             raw = "\n".join(lines[1:-1] if lines[-1].startswith("```") else lines[1:])
-        tree = json.loads(raw)
+        tree = normalize_ai_mindmap_tree(json.loads(raw))
     except Exception as e:
         return jsonify(error=str(e)), 502
 

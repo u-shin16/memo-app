@@ -130,6 +130,40 @@ class AiFileApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         contents = client.models.generate_content.call_args.kwargs["contents"]
         self.assertIn("学習計画", contents)
+        self.assertIn("すべてのノードで memo を必ず生成", contents)
+
+    def test_mindmap_api_normalizes_descriptions_to_memo(self):
+        client = self._mock_client({
+            "title": "計画",
+            "content": "全体の進め方を整理する",
+            "children": [
+                {
+                    "title": "準備",
+                    "description": "必要な資料と担当を決める",
+                    "children": [
+                        {"title": "調査", "summary": "先行事例を確認する", "children": []},
+                    ],
+                },
+            ],
+        })
+        with patch.object(app_module, "create_gemini_client", return_value=client):
+            response = self.client.post("/api/ai-mindmap", json={"prompt": "学習計画"})
+
+        self.assertEqual(response.status_code, 200)
+        tree = response.get_json()["tree"]
+        self.assertEqual(tree["memo"], "全体の進め方を整理する")
+        self.assertEqual(tree["children"][0]["memo"], "必要な資料と担当を決める")
+        self.assertEqual(tree["children"][0]["children"][0]["memo"], "先行事例を確認する")
+
+    def test_mindmap_api_fills_missing_memo(self):
+        client = self._mock_client({"title": "計画", "memo": "", "children": [{"title": "準備"}]})
+        with patch.object(app_module, "create_gemini_client", return_value=client):
+            response = self.client.post("/api/ai-mindmap", json={"prompt": "学習計画"})
+
+        self.assertEqual(response.status_code, 200)
+        tree = response.get_json()["tree"]
+        self.assertTrue(tree["memo"].strip())
+        self.assertTrue(tree["children"][0]["memo"].strip())
 
     def test_accepts_file_without_prompt(self):
         client = self._mock_client({"title": "結果", "content": "本文", "children": []})
@@ -198,7 +232,7 @@ class AiFileApiTests(unittest.TestCase):
         create_client.assert_not_called()
 
     def test_index_exposes_supported_image_types(self):
-        response = self.client.get("/")
+        response = self.client.get("/app")
         html = response.get_data(as_text=True)
 
         self.assertEqual(response.status_code, 200)
