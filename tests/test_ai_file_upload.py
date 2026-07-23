@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import base64
+import os
 import unittest
 from io import BytesIO
 from unittest.mock import Mock, patch
@@ -91,6 +92,37 @@ class AiFileExtractionTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, "拡張子と一致"):
             app_module._get_validated_image_mime_type("fake.jpg", ONE_PIXEL_PNG)
+
+
+class GeminiClientConfigTests(unittest.TestCase):
+    def test_vertex_missing_credentials_falls_back_to_api_key(self):
+        with (
+            patch.object(app_module, "_USE_VERTEX_AI", True),
+            patch.dict(os.environ, {
+                "GOOGLE_APPLICATION_CREDENTIALS": "/tmp/missing-vertex-sa.json",
+                "GOOGLE_CLOUD_PROJECT": "test-project",
+                "GEMINI_API_KEY": "fallback-key",
+            }),
+            patch.object(app_module.genai, "Client", return_value="client") as client_factory,
+        ):
+            self.assertEqual(app_module.create_gemini_client(), "client")
+
+        client_factory.assert_called_once_with(api_key="fallback-key")
+
+    def test_vertex_missing_credentials_without_api_key_reports_clear_error(self):
+        with (
+            patch.object(app_module, "_USE_VERTEX_AI", True),
+            patch.dict(os.environ, {
+                "GOOGLE_APPLICATION_CREDENTIALS": "/tmp/missing-vertex-sa.json",
+                "GOOGLE_CLOUD_PROJECT": "test-project",
+                "GEMINI_API_KEY": "",
+            }),
+            patch.object(app_module.genai, "Client") as client_factory,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "Vertex AIの認証ファイル"):
+                app_module.create_gemini_client()
+
+        client_factory.assert_not_called()
 
 
 class AiFileApiTests(unittest.TestCase):

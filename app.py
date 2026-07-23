@@ -258,14 +258,24 @@ _MINDMAP_PROMPT = """\
 
 
 def create_gemini_client():
+    api_key = os.getenv("GEMINI_API_KEY", "").strip()
     if _USE_VERTEX_AI:
+        credentials_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "").strip()
+        if credentials_path and not Path(credentials_path).expanduser().is_file():
+            if api_key:
+                return genai.Client(api_key=api_key)
+            raise RuntimeError(
+                "Vertex AIの認証ファイルが見つかりません。"
+                "GEMINI_API_KEYを設定するか、GOOGLE_APPLICATION_CREDENTIALSのパスを確認してください。"
+            )
         project = os.getenv("GOOGLE_CLOUD_PROJECT", "")
         location = os.getenv("GOOGLE_CLOUD_LOCATION", "us-central1")
         if not project:
+            if api_key:
+                return genai.Client(api_key=api_key)
             raise RuntimeError("GOOGLE_CLOUD_PROJECT が設定されていません")
         return genai.Client(vertexai=True, project=project, location=location)
 
-    api_key = os.getenv("GEMINI_API_KEY", "")
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY が設定されていません")
     return genai.Client(api_key=api_key)
