@@ -1410,6 +1410,7 @@ body.has-large-editor-open .note-head {
   position: fixed;
   right: 22px;
   bottom: 22px;
+  z-index: 14000;
   max-width: 360px;
   padding: 14px 16px;
   border-radius: 16px;

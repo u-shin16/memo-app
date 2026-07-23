@@ -9474,17 +9474,17 @@ function toggleMindMapNodeSettingsPanel() {
 }
 
 async function openMindMapPanel() {
-  closeMindMapSettingsPanel();
-  closeMindMapNodeSettingsPanel();
-  closeMobileMenu();
-  closeTemplatesPanel();
-  hideCtxMenu();
-  hideMediaCtxMenu();
-  els.accountMenu.hidden = true;
-  await saveCurrentEditorNow();
-  els.appShell.hidden = true;
-  els.mindMapOverlay.hidden = false;
   try {
+    closeMindMapSettingsPanel();
+    closeMindMapNodeSettingsPanel();
+    closeMobileMenu();
+    closeTemplatesPanel();
+    hideCtxMenu();
+    hideMediaCtxMenu();
+    if (els.accountMenu) els.accountMenu.hidden = true;
+    await saveCurrentEditorNow();
+    els.appShell.hidden = true;
+    els.mindMapOverlay.hidden = false;
     await loadMindMap();
     renderMindMap();
     setCollabPresence("mindmap", { immediate: true });
@@ -9493,7 +9493,9 @@ async function openMindMapPanel() {
       else applyMindMapTransform();
     });
   } catch (e) {
-    showToast(e.message);
+    els.mindMapOverlay.hidden = true;
+    els.appShell.hidden = false;
+    showToast(e?.message || "マインドマップを開けませんでした。");
   }
 }
 
